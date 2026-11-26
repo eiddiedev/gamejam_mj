@@ -7,6 +7,9 @@ signal blade_cuts(where: Vector2, direction: Vector2, heavy: bool)
 signal melee_contact(where: Vector2, direction: Vector2, weight: float, armored: bool, heavy: bool)
 signal enemy_contact(where: Vector2, direction: Vector2, heavy: bool)
 signal herald_cast(where: Vector2, extinguished: PackedVector2Array)
+signal moth_contact(where: Vector2, direction: Vector2, destination: int, moth: Node2D)
+
+enum MothDestination { HEARTH, BRAZIER, LANTERN }
 
 const Slot = preload("res://scripts/entities/TowerController.gd")
 const Enemy = preload("res://scripts/entities/EnemyController.gd")
@@ -1263,19 +1266,27 @@ func move_moth(foe: Enemy, speed: float, delta: float) -> void:
 		lamp = false
 		vessel = null
 		target = battle.fire_point
-	if foe.position.distance_squared_to(target) > 14.0 ** 2:
+	var remaining := foe.position.distance_squared_to(target)
+	var heading := foe.position.direction_to(target)
+	var committed := speed > 0.0 and foe.flight_index >= foe.flight_plan.size() - 1 and foe.facing.dot(heading) > 0.72
+	foe.set_meta(&"moth_dive", 1.0 - smoothstep(14.0, 45.0, sqrt(remaining)) if committed else 0.0)
+	if remaining > 14.0 ** 2:
 		return
 	foe.removed = true
 	add_ring(target, 34.0, Color("#f48759"), 0.52)
+	var destination := MothDestination.HEARTH
 	if lamp:
+		destination = MothDestination.LANTERN
 		battle.oil = maxf(0.0, battle.oil - 20.0)
 		battle.announce("噬火蛾撞上提灯，灯油 -20")
 	elif vessel != null:
+		destination = MothDestination.BRAZIER
 		extinguish(vessel)
 		battle.announce("噬火蛾扑灭了一座烽火盆")
 	else:
 		battle.hurt_fire(15.0, true)
 		battle.announce("噬火蛾撞上篝火，火势 -15")
+	moth_contact.emit(target, foe.facing, destination, foe)
 
 
 func flight_allowed(foe: Enemy, target: Vector2) -> bool:

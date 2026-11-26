@@ -10,6 +10,9 @@ const FORGE := "res://scenes/ui/OathForgeUI.tscn"
 
 var screen: Node
 var modal: CanvasLayer
+var modal_cancel: Callable
+var modal_return_focus: Control
+var map_focus_behavior := Control.FOCUS_BEHAVIOR_INHERITED
 
 func _ready() -> void:
 	if RunState.nodes.is_empty():
@@ -29,7 +32,7 @@ func show_map() -> void:
 	map.configure(RunState)
 
 func set_screen(scene: Node) -> void:
-	close_modal()
+	close_modal(false)
 	if is_instance_valid(screen):
 		remove_child(screen)
 		screen.queue_free()
@@ -123,7 +126,7 @@ func rest_at_camp() -> void:
 	finish_node()
 
 func show_blueprints() -> void:
-	var panel := make_modal("重铸蓝图", "挑选一项工事", "初次建造将直接从蓝图等级开始。蓝图最高可升到三级，并可带入下轮。")
+	var panel := make_modal("重铸蓝图", "挑选一项工事", "初次建造将直接从蓝图等级开始。蓝图最高可升到三级，并可带入下轮。", show_camp)
 	var index := 0
 	for kind in RunState.TOWERS:
 		var prior: int = RunState.blueprints.get(kind, 1)
@@ -172,22 +175,22 @@ func confirm_restart(seed_value: int, use_random_seed: bool) -> void:
 	if RunState.visited.is_empty():
 		restart(seed_value)
 		return
-	var panel := make_modal("烽火路线", "重开这一程？", "开始新的巡夜将清空本轮誓言、行囊与道路进度。输入相同种子可重走最初的路线。")
+	var panel := make_modal("烽火路线", "重开这一程？", "开始新的巡夜将清空本轮誓言、行囊与道路进度。输入相同种子可重走最初的路线。", close_modal)
 	Atlas.button(panel, "重开巡夜", Rect2(72, 249, 405, 47), restart.bind(seed_value), true)
-	Atlas.button(panel, "继续当前巡夜", Rect2(72, 315, 405, 43), close_modal)
+	Atlas.button(panel, "继续当前巡夜", Rect2(72, 315, 405, 43), close_modal).grab_focus.call_deferred()
 
 func restart(seed_value: int) -> void:
 	RunState.start_new(seed_value)
 	show_map()
 
 func show_defeat(id: int) -> void:
-	var panel := make_modal("守夜结束", "这处火种熄灭了", "这轮共守成 %d 场夜战。可以回到这场开始时的状态，或返回行图改选前路。" % RunState.victories)
+	var panel := make_modal("守夜结束", "这处火种熄灭了", "这轮共守成 %d 场夜战。可以回到这场开始时的状态，或返回行图改选前路。" % RunState.victories, close_modal)
 	Atlas.button(panel, "重试本场", Rect2(72, 222, 405, 44), open_node.bind(id), true)
 	Atlas.button(panel, "返回行图", Rect2(72, 278, 405, 44), close_modal)
 	Atlas.button(panel, "同种子重开", Rect2(72, 334, 405, 44), restart.bind(RunState.run_seed))
 
 func show_records() -> void:
-	var panel := make_modal("守夜人的行囊", "誓言与行囊", "")
+	var panel := make_modal("守夜人的行囊", "誓言与行囊", "", close_modal)
 	var scroll := ScrollContainer.new()
 	scroll.position = Vector2(28, 103)
 	scroll.size = Vector2(492, 235)
@@ -219,10 +222,17 @@ func add_record(parent: Control, text: String, color: Color = Atlas.CREAM) -> vo
 	var entry := Atlas.label(parent, text, Rect2(0, 0, 467, 20), 16, color)
 	entry.custom_minimum_size.x = 467
 
-func make_modal(tag: String, title: String, description: String) -> Panel:
-	close_modal()
+func make_modal(tag: String, title: String, description: String, cancel := Callable()) -> Panel:
+	var prior := modal_return_focus if is_instance_valid(modal) else get_viewport().gui_get_focus_owner()
+	close_modal(false)
 	if screen is MapScreen:
+		map_focus_behavior = screen.focus_behavior_recursive
+		if is_instance_valid(prior) and screen.is_ancestor_of(prior):
+			modal_return_focus = prior
+			prior.release_focus()
+		screen.focus_behavior_recursive = Control.FOCUS_BEHAVIOR_DISABLED
 		screen.set_chart_input_enabled(false)
+	modal_cancel = cancel
 	modal = CanvasLayer.new()
 	modal.layer = 30
 	add_child(modal)
@@ -236,13 +246,40 @@ func make_modal(tag: String, title: String, description: String) -> Panel:
 	Atlas.label(panel, tag, Rect2(27, 21, 496, 23), 15, Atlas.GOLD)
 	Atlas.label(panel, title, Rect2(27, 48, 496, 43), 33, Atlas.CREAM, true)
 	if not description.is_empty():
-		Atlas.label(panel, description, Rect2(27, 124, 496, 94), 18, Atlas.MUTED)
+		var body := Atlas.label(panel, description, Rect2(27, 124, 496, 94), 18, Atlas.MUTED)
+		body.size = Vector2(496, 94)
+	focus_modal.call_deferred(modal)
 	return panel
 
-func close_modal() -> void:
+func focus_modal(overlay: CanvasLayer) -> void:
+	if not is_instance_valid(overlay) or overlay != modal:
+		return
+	var choices: Array[Button] = []
+	for button: Button in overlay.find_children("*", "Button", true, false):
+		if not button.disabled and button.is_visible_in_tree():
+			choices.append(button)
+	for index in choices.size():
+		var button := choices[index]
+		button.focus_next = button.get_path_to(choices[(index + 1) % choices.size()])
+		button.focus_previous = button.get_path_to(choices[posmod(index - 1, choices.size())])
+	if not choices.is_empty():
+		choices[0].grab_focus()
+
+func _input(event: InputEvent) -> void:
+	if is_instance_valid(modal) and event.is_action_pressed("ui_cancel"):
+		get_viewport().set_input_as_handled()
+		if modal_cancel.is_valid():
+			modal_cancel.call()
+
+func close_modal(restore_focus := true) -> void:
 	if is_instance_valid(modal):
 		remove_child(modal)
 		modal.queue_free()
 		if screen is MapScreen:
+			screen.focus_behavior_recursive = map_focus_behavior
 			screen.set_chart_input_enabled(true)
+			if restore_focus and is_instance_valid(modal_return_focus):
+				modal_return_focus.grab_focus()
 		modal = null
+	modal_return_focus = null
+	modal_cancel = Callable()

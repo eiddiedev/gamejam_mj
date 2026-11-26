@@ -44,6 +44,8 @@ func check_region(biome: int, watcher_radius: float, interaction_range: float) -
 	var watcher := Terrain.point(region["start"])
 	verify(resolver.can_stand(watcher, watcher_radius), "%d watcher spawn is clear" % biome)
 	verify(resolver.can_stand(hearth, watcher_radius), "%d hearth approach is clear" % biome)
+	if biome == 3:
+		check_obsidian_gates(resolver, watcher_radius)
 	var reachable := connected_ground(resolver, watcher, watcher_radius)
 	for site: Array in Terrain.SUPPORTS[biome]:
 		var anchor := Terrain.point(site[0])
@@ -70,6 +72,20 @@ func check_region(biome: int, watcher_radius: float, interaction_range: float) -
 				verify(clear, "%d bridge %d lane %d radius %d sweeps to the hearth" % [biome, state, lane, radius])
 	view.queue_free()
 	await process_frame
+
+func check_obsidian_gates(resolver: Collision, watcher_radius: float) -> void:
+	for gate in [[460.0, 270.0, 0.34], [615.0, 146.0, -0.53]]:
+		var center := Terrain.point([gate[0], gate[1]])
+		var axis := Vector2(-sin(gate[2]), sin(Model.PITCH) * cos(gate[2]))
+		var span := axis * Model.PIXELS * 0.75
+		var inside := center + span
+		var outside := center - span
+		verify(resolver.can_stand(center, watcher_radius)
+			and resolver.traverse_clear(inside, outside, watcher_radius)
+			and resolver.traverse_clear(outside, inside, watcher_radius),
+			"The watcher can pass through the open Obsidian gate at %s" % center)
+		verify(not resolver.traverse_clear(inside, outside, 15.0),
+			"The same Obsidian lintel blocks a tall ground enemy")
 
 func connected_ground(resolver: Collision, watcher: Vector2, radius: float) -> PackedVector2Array:
 	var grid := resolver.grid(radius)

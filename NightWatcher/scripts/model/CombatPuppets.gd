@@ -43,6 +43,7 @@ func setup(model: Node3D, level: Node2D) -> void:
 		lantern_asset = load(LANTERN_PATH) as PackedScene
 	var combat = battle.combat
 	combat.watcher.draw_body = false
+	combat.moth_contact.connect(release_moth_on_contact)
 	for support in combat.towers:
 		support.hide()
 	if combat.ally != null:
@@ -600,16 +601,10 @@ func pose_enemy(enemy: Enemy, rig: Dictionary, delta: float) -> void:
 	root.visible = enemy.kind != Enemy.SHADE or enemy.lit
 	if not root.visible:
 		return
-	var altitude := 0.76 + sin(enemy.age*10.5)*0.17 if enemy.kind == Enemy.MOTH else 0.014
-	var speed := place(rig,enemy.position,enemy.facing,altitude,delta)
 	if enemy.kind == Enemy.MOTH:
-		var wings: Array = rig.wings
-		var flight := sin(enemy.age*31.0)
-		wings[0].rotation.z = -0.16 + flight*0.72
-		wings[1].rotation.z = 0.16 - flight*0.72
-		root.rotation.x = 0.16 + flight*0.06 - enemy.hit*2.20
-		flash(rig, enemy.hit/0.13)
+		pose_moth(enemy, rig, delta)
 		return
+	var speed := place(rig,enemy.position,enemy.facing,0.014,delta)
 	var recoil := maxf(enemy.stagger/0.29,enemy.hit/0.13)
 	if enemy.kind == Enemy.CRAWLER:
 		if enemy.tell > 0.0 or enemy.attack_pose > 0.0:
@@ -659,6 +654,32 @@ func pose_enemy(enemy: Enemy, rig: Dictionary, delta: float) -> void:
 	if enemy.kind == Enemy.HERALD:
 		pose_herald_rite(enemy, rig)
 	flash(rig,maxf(enemy.hit/0.13, recoil*0.58))
+
+
+func pose_moth(enemy: Enemy, rig: Dictionary, delta: float) -> void:
+	var wanted: float = enemy.get_meta(&"moth_dive", 0.0)
+	var previous: float = rig.get("moth_dive", 0.0)
+	var dive := maxf(wanted, move_toward(previous, wanted, delta*5.9))
+	rig["moth_dive"] = dive
+	var fold := smoothstep(0.15, 0.90, dive)
+	var altitude := lerpf(0.76 + sin(enemy.age*10.5)*0.17, 0.40, dive)
+	place(rig, enemy.position, enemy.facing, altitude, delta)
+	var wings: Array = rig.wings
+	var flap := sin(enemy.age*31.0) * (1.0 - 0.82*fold)
+	for index in range(wings.size()):
+		var side := -1.0 if index == 0 else 1.0
+		wings[index].rotation = Vector3(0.06*fold, side*0.97*fold, side*(0.16 - flap*0.72 + fold*0.36))
+	(rig.root as Node3D).rotation.x = 0.16 + flap*0.06 + 0.69*dive - enemy.hit*2.20
+	flash(rig, enemy.hit/0.13)
+
+
+func release_moth_on_contact(_where: Vector2, _direction: Vector2, _destination: int, moth: Node2D) -> void:
+	if not actors.has(moth):
+		return
+	var root: Node3D = actors[moth].root
+	root.hide()
+	root.queue_free()
+	actors.erase(moth)
 
 
 func pose_herald_rite(enemy: Enemy, rig: Dictionary) -> void:

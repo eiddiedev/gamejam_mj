@@ -112,6 +112,7 @@ func setup(model: Node3D, fight: Node2D) -> void:
 	combat.melee_contact.connect(melee_touch)
 	combat.enemy_contact.connect(enemy_touch)
 	combat.herald_cast.connect(herald_cast)
+	combat.moth_contact.connect(moth_contact)
 	air = AudioStreamPlayer.new()
 	air.volume_db = -14.0
 	add_child(air)
@@ -121,7 +122,7 @@ func setup(model: Node3D, fight: Node2D) -> void:
 	rite_voice = AudioStreamPlayer.new()
 	rite_voice.volume_db = -13.0
 	add_child(rite_voice)
-	for voice in ["swish","shear","bone","iron","thud","rite"]:
+	for voice in ["swish","shear","bone","iron","thud","rite","moth"]:
 		sounds[voice] = texture_of_sound(voice)
 
 func camera_offset() -> Vector2:
@@ -175,6 +176,36 @@ func herald_cast(where: Vector2, doused: PackedVector2Array) -> void:
 	rite_voice.volume_db = lerpf(-24.0,-13.0,force)
 	play_voice(rite_voice,"rite")
 
+func moth_contact(where: Vector2, direction: Vector2, destination: int, _moth: Node2D) -> void:
+	var point := moth_impact_origin(where, destination)
+	var incoming := Vector3(direction.x,0.0,direction.y).normalized()
+	for index in range(11):
+		emit_fragment(point,index,true,incoming * 1.1 + Vector3.UP * 0.56)
+	for index in range(3):
+		emit_fragment(point,index,false,incoming * 0.46)
+	glint.position = point
+	glint.show()
+	flare_left = maxf(flare_left,0.078)
+	var player: Vector2 = combat.watcher.position
+	var intensity := 1.0 - smoothstep(82.0, 320.0, player.distance_to(where))
+	if intensity > 0.0 and feedback_left <= 0.0:
+		kick(direction,1.52*intensity)
+		feedback_left = 0.052
+	play_voice(contact,"moth")
+
+func moth_impact_origin(where: Vector2, destination: int) -> Vector3:
+	var field = combat.battle
+	if destination == combat.MothDestination.LANTERN:
+		var lamp: Node3D = field.scenery.puppets.lantern_mount
+		if is_instance_valid(lamp):
+			return lamp.to_global(Vector3(0.0,-0.14,0.0))
+	elif destination == combat.MothDestination.BRAZIER:
+		var index: int = field.slot_points.find(where)
+		if index >= 0:
+			var bowl: Node3D = field.scenery.reliquary.cradles[index]
+			return bowl.to_global(Vector3.UP*0.49)
+	return landscape.screen_floor(where,0.43)
+
 func play_voice(player: AudioStreamPlayer, title: String) -> void:
 	player.stream = sounds[title]
 	player.pitch_scale = random.randf_range(0.95,1.09)
@@ -213,6 +244,10 @@ func texture_of_sound(title: String) -> AudioStreamWAV:
 		elif title == "rite":
 			var note := sin(TAU * (102.0*t - 62.0*t*t)) * 0.61 + sin(TAU * 137.0*t) * 0.23
 			output = note * smoothstep(0.0,0.032,t) * exp(-t*12.0) + low * exp(-t*26.0) * 0.19
+		elif title == "moth":
+			var thump := sin(TAU * (155.0*t - 220.0*t*t)) * exp(-t*34.0)
+			var sizzle := (raw-low) * exp(-t*59.0) * (0.43 + 0.26*sin(t*570.0))
+			output = thump*0.44 + sizzle + low * exp(-t*19.0)*0.18
 		else:
 			var clang := (sin(TAU*1368.0*t)*0.26 + sin(TAU*1893.0*t)*0.16 + sin(TAU*2461.0*t)*0.14)*exp(-t*39.0)
 			output = (clang + raw*exp(-t*156.0)*0.32 + sin(TAU*212.0*t)*exp(-t*93.0)*0.23)*0.87

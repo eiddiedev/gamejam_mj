@@ -26,7 +26,9 @@ var frame: Control
 var offer_layer: Control
 var tool_layer: Control
 var message: Label
+var instructions: Label
 var slabs: Array[Control] = []
+var stone_buttons: Array[Button] = []
 var runes: Array[Button] = []
 var forge_sound: AudioStreamPlayer
 
@@ -38,7 +40,8 @@ func _ready() -> void:
 	add_child(frame)
 	resized.connect(frame.queue_redraw)
 	put_text(frame, "改字铸誓", Rect2(310, 88, 660, 79), 59, PAPER, true, true)
-	put_text(frame, "选一块石碑，重刻发光的字母", Rect2(310, 177, 660, 25), 17, SOFT, true)
+	instructions = put_text(frame, "选择石碑，重刻发光的字母 · Tab 切换 · Enter 确认",
+		Rect2(293, 177, 694, 25), 17, SOFT, true)
 	offer_layer = Control.new()
 	offer_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	frame.add_child(offer_layer)
@@ -59,12 +62,14 @@ func configure(state, force_id: String = "", can_reroll: bool = false) -> void:
 func show_offers() -> void:
 	selected = -1
 	slabs.clear()
+	stone_buttons.clear()
 	runes.clear()
 	clear_layer(offer_layer)
 	clear_layer(tool_layer)
+	instructions.visible = not offers.is_empty()
 	if offers.is_empty():
 		put_text(offer_layer, "铭文已全部铸成", Rect2(305, 355, 670, 58), 32, PAPER, true, true)
-		make_button(tool_layer, "继续守望", Rect2(546, 630, 188, 51), func(): chosen.emit(""))
+		make_button(tool_layer, "继续守望", Rect2(546, 630, 188, 51), func(): chosen.emit("")).grab_focus()
 		return
 	for index in offers.size():
 		build_stone(index, STANDING_STONES[index])
@@ -81,7 +86,6 @@ func build_stone(index: int, bounds: Rect2) -> void:
 	stone.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stone.modulate = Color(0.79, 0.83, 0.84) if locked else Color.WHITE
 	offer_layer.add_child(stone)
-	stone.draw.connect(paint_stone.bind(stone, index, tint))
 	slabs.append(stone)
 
 	var opener := Button.new()
@@ -98,6 +102,8 @@ func build_stone(index: int, bounds: Rect2) -> void:
 	for phase in ["normal", "hover", "pressed", "focus", "disabled"]:
 		opener.add_theme_stylebox_override(phase, StyleBoxEmpty.new())
 	stone.add_child(opener)
+	stone_buttons.append(opener)
+	stone.draw.connect(paint_stone.bind(stone, index, tint, opener))
 
 	put_text(stone, rarity_name(oath["rarity"]), Rect2(6, stone.size.y * 0.35, stone.size.x - 28.0, 26),
 		14, tint, true)
@@ -119,6 +125,7 @@ func build_stone(index: int, bounds: Rect2) -> void:
 			stone.draw.connect(plate.queue_redraw)
 			rune.tooltip_text = "可替换的字母"
 			rune.disabled = locked
+			rune.focus_mode = Control.FOCUS_NONE
 			runes.append(rune)
 		else:
 			put_text(stone, base[letter], well, 32, Color("#d1ccaf"), true, true)
@@ -137,6 +144,12 @@ func select_stone(index: int) -> void:
 func update_tools() -> void:
 	clear_layer(tool_layer)
 	message = put_text(tool_layer, "", Rect2(291, 661, 698, 30), 15, SOFT, true)
+	var choices: Array[Button] = []
+	for stone_button in stone_buttons:
+		if not stone_button.disabled:
+			choices.append(stone_button)
+	choices.sort_custom(func(left: Button, right: Button): return left.global_position.x < right.global_position.x)
+	var preferred := stone_buttons[0]
 	if selected < 0 and not forced.is_empty():
 		put_text(tool_layer, "选中 %s 石碑，铸成本次誓言。" % OathDatabase.get_oath(forced)["base"],
 			Rect2(291, 617, 698, 42), 19, PAPER, true, true)
@@ -151,10 +164,19 @@ func update_tools() -> void:
 		var commit := make_button(tool_layer, "刻入  %s" % required, Rect2(548, 703, 184, 48),
 			apply_letter.bind(required), rarity_color(oath["rarity"]))
 		commit.tooltip_text = "%s → %s" % [oath["base"], offers[selected]]
+		choices.append(commit)
+		preferred = commit
 	if reroll_available:
 		var reroll := make_button(tool_layer, "刷新候选 · 30 余烬", Rect2(1024, 703, 206, 48), reroll_oaths)
 		reroll.disabled = run.embers < REROLL_COST or run.oaths.size() >= OathDatabase.OATHS.size() - 3
 		reroll.tooltip_text = "余烬 %d" % run.embers
+		if not reroll.disabled:
+			choices.append(reroll)
+	for index in choices.size():
+		var button := choices[index]
+		button.focus_next = button.get_path_to(choices[(index + 1) % choices.size()])
+		button.focus_previous = button.get_path_to(choices[posmod(index - 1, choices.size())])
+	preferred.grab_focus()
 
 func reroll_oaths() -> void:
 	if forging or not reroll_available or run.oaths.size() >= OathDatabase.OATHS.size() - 3:
@@ -188,6 +210,8 @@ func apply_letter(letter: String) -> void:
 		message.modulate = Color("#ffbb90")
 		return
 	forging = true
+	for stone_button in stone_buttons:
+		stone_button.focus_mode = Control.FOCUS_NONE
 	clear_layer(tool_layer)
 	put_text(tool_layer, "誓言已成  /  %s" % result, Rect2(265, 623, 750, 57), 30,
 		rarity_color(oath["rarity"]), true, true)
@@ -329,10 +353,11 @@ func paint_background() -> void:
 		frame.draw_colored_polygon(PackedVector2Array([point + Vector2(-6, 0), point + Vector2(0, -5),
 			point + Vector2(6, 0), point + Vector2(0, 5)]), Color("#a9875c"))
 
-func paint_stone(stone: Control, index: int, tint: Color) -> void:
+func paint_stone(stone: Control, index: int, tint: Color, opener: Button) -> void:
 	var active := index == selected
+	var focused := opener.has_focus()
 	var hover := stone.get_rect().has_point(offer_layer.get_local_mouse_position())
-	var outline := tint if active else tint.darkened(0.26 if hover else 0.64)
+	var outline := tint if active or focused else tint.darkened(0.26 if hover else 0.64)
 	var summit: Vector2 = [Vector2(0.46, 0.024), Vector2(0.36, 0.04), Vector2(0.57, 0.080)][index]
 	var face := stone_points(stone, [Vector2(0.04, 0.83), Vector2(0.08, 0.41), Vector2(0.08, 0.28),
 		Vector2(0.16, 0.20), Vector2(0.19, 0.13), summit,
@@ -354,6 +379,10 @@ func paint_stone(stone: Control, index: int, tint: Color) -> void:
 		Vector2(0.969, 0.448), Vector2(0.913, 0.189), Vector2(0.797, 0.078), summit + Vector2(0.10, -0.012)]))
 	draw_cut(stone, facet, Color("#2e464e") if active else Color("#20343d"), Color("#101e24"), 1.4)
 	draw_cut(stone, face, Color("#455653") if active else Color("#344649"), Color("#121e23"), 2.1)
+	if focused:
+		var border := face.duplicate()
+		border.append(face[0])
+		stone.draw_polyline(border, Color(tint.lightened(0.31), 0.86), 2.2, true)
 	var planes := stone_points(stone, [Vector2(0.07, 0.85), Vector2(0.13, 0.67), Vector2(0.18, 0.39),
 		Vector2(0.20, 0.22), summit + Vector2(0.017, 0.021), Vector2(0.61, 0.122),
 		Vector2(0.57, 0.31), Vector2(0.52, 0.53), Vector2(0.43, 0.65), Vector2(0.54, 0.90)])

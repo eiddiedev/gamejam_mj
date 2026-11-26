@@ -10,7 +10,7 @@
 
 ## 长夜守望者 · 实时三维战场
 
-大陆行图以策划包的大地图为编辑对象，用内置图像生成工具重绘。当前贴图为 1451 × 1084，保留海岸线、区域位置和路线坐标。重绘提示要求用钢笔轮廓、少量排线和大片水粉色块，固定四区、城墙、巨骸和盘根古堡的位置，并去掉图中的文字与路线叠层。图内的路线和地区名由 Godot 绘制，随行图一起缩放和拖动。 [大陆行图](NightWatcher/assets/maps/00_world_overview_ink.png)
+大陆行图以策划包的大地图为编辑对象，用内置图像生成工具重绘。当前贴图为 1451 × 1084，保留海岸线、区域位置和路线坐标。重绘提示要求用钢笔轮廓、少量排线和大片水粉色块，固定四区、城墙、巨骸和盘根古堡的位置，并去掉图中的文字与路线叠层。放大时 Godot 改用双三次采样保留细线，图内的路线和地区名随行图一起缩放和拖动。 [大陆行图](NightWatcher/assets/maps/00_world_overview_ink.png) · [行图材质](NightWatcher/scripts/campaign/atlas_ink.gdshader)
 
 四张区域插画记录构图和地标。战场几何分别在 [scripts/model](NightWatcher/scripts/model) 内构建，包含巨骸与锈剑、砂岩断崖与巨肋、枯树环堡与吊桥、黑曜长墙与裂隙晶簇。
 
@@ -18,7 +18,7 @@
 
 胸廓和手臂分别用 Godot 生成，肋骨有不同的弧度和断面，前臂由两条长骨组成，手掌和手指分段成形。碰撞取自骨面网格，表面的铅笔线单独绘制。骨弩用支架固定在眼窝边，箭矢从模型上的挂点射出。[胸廓模型](NightWatcher/scripts/model/ValleyRibs.gd) · [手臂模型](NightWatcher/scripts/model/ValleyArms.gd)
 
-黑曜长墙的裂颅独立建模，霜层、凹陷眼窝和破损金属箍都沿颅骨形体绘制。半埋的眼窝保留了骨弩安装点，玩家可以从颅骨外侧靠近操作。 [霜蚀裂颅模型](NightWatcher/scripts/model/ObsidianRelic.gd)
+黑曜长墙由连续的斜面石墙、扶壁、墙顶步道和断垛组成，石缝跟着墙面画。两道拱门都能让巡夜人穿过，身形更高的敌人会被门楣挡住。半埋裂颅的霜层、凹陷眼窝和破损金属箍沿颅骨形体绘制，眼窝保留骨弩安装点。 [长墙模型](NightWatcher/scripts/model/Obsidian.gd) · [裂颅模型](NightWatcher/scripts/model/ObsidianRelic.gd)
 
 蚀沙古台的砂岩沿不规则层理逐层削出岩檐。遗迹双拱、半截墙和石阶共用依崖的台基，东侧用独立的断肋和椎骨表现半埋的遗骸。浅沙色块和火光铺在实际地表，近处的岩檐遮住后方地面。 [蚀沙古台模型](NightWatcher/scripts/model/Sandstone.gd)
 

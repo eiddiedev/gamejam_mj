@@ -39,6 +39,8 @@ func test_campaign() -> void:
 	var map = campaign.screen
 	expect(first.id == map.selected and first.zone == 0 and state.run_seed == SEED,
 		"The deterministic map selects its first reachable valley battle")
+	await check_records_focus(map)
+	check_chart_reveal(map)
 	await capture("01-world-map")
 	await press_button(map.confirm)
 	var battle = campaign.screen
@@ -158,6 +160,7 @@ func test_campaign() -> void:
 	if not expect(forge.name == &"OathForgeUI" and forge.offers.size() == 3 and forge.offers[0] == "SWORE",
 			"First victory presents the three-stone forge with guaranteed SWORE"):
 		return
+	expect(forge.stone_buttons[0].has_focus(), "The available oath can be selected immediately by keyboard")
 	await press_button(forge.runes[0])
 	expect(forge.selected == 0 and forge.runes[0].text == "D", "Clicking the glowing D selects the SWORD engraving")
 	await capture("04-sword-oath")
@@ -182,6 +185,32 @@ func test_campaign() -> void:
 	expect(state.oaths.has("SWORE") and state.blueprints.get("ballista") == 2 and state.relics.has("守火铜环"),
 		"Endless cycle preserves the oath, upgraded blueprint and relic")
 	await capture("06-endless-route")
+
+func check_records_focus(map: Node) -> void:
+	var records := find_button(map, "誓言与行囊")
+	if not expect(records != null, "The campaign map offers access to the watcher's records"):
+		return
+	await press_button(records)
+	var overlay: CanvasLayer = campaign.modal
+	if not expect(is_instance_valid(overlay), "Opening records displays a campaign modal"):
+		return
+	send_key(KEY_TAB)
+	var focused := root.gui_get_focus_owner()
+	expect(focused != null and overlay.is_ancestor_of(focused) and state.active_node == -1,
+		"Tab stays in the records modal and cannot enter the selected battle")
+	send_key(KEY_ESCAPE)
+	expect(not is_instance_valid(campaign.modal) and records.has_focus(),
+		"Escape restores the focus to the map's records button")
+
+func check_chart_reveal(map) -> void:
+	var marker: Button = map.markers[map.selected]
+	map.zoom_chart(2.25, Vector2.ZERO)
+	expect(map.locate_site.visible and not map.visible_chart().encloses(marker.get_rect()),
+		"Magnifying away from the selected route offers a way back")
+	marker.grab_focus()
+	expect(map.visible_chart().encloses(marker.get_rect()) and is_equal_approx(map.chart_scale, 2.25),
+		"Focusing the selected route brings it into view at the current magnification")
+	map.reset_chart()
 
 func exercise_charged_strike(battle) -> void:
 	var lane := test_strike_lane(battle, battle.fire_point, 80.0, 118.0, 15.0)

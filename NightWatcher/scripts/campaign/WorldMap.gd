@@ -9,7 +9,9 @@ const Atlas = preload("res://scripts/campaign/AtlasUI.gd")
 const Marker = preload("res://scripts/campaign/AtlasMarker.gd")
 const Folio = preload("res://scripts/campaign/AtlasFolio.gd")
 const OVERVIEW = preload("res://assets/maps/00_world_overview_ink.png")
+const ATLAS_BRUSH = preload("res://scripts/campaign/atlas_ink.gdshader")
 const MAP_RECT := Rect2(14, 27, 990, 739.2)
+const SIDEBAR_X := 989.0
 const ATLAS_COORDINATES := Vector2(1200, 896)
 const REGION_LABELS := [Vector2(118, 821), Vector2(325, 260), Vector2(936, 378), Vector2(690, 42)]
 
@@ -26,9 +28,11 @@ var chart: Control
 var paper: TextureRect
 var region_tags: Array[Panel] = []
 var zoom_meter: Button
+var locate_site: Button
 var chart_scale := 1.0
 var chart_offset := Vector2.ZERO
 var drag_chart := false
+var left_button_down := false
 
 func configure(state) -> void:
 	run = state
@@ -52,6 +56,9 @@ func make_chart() -> void:
 	paper.texture = OVERVIEW
 	paper.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	paper.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	var ink := ShaderMaterial.new()
+	ink.shader = ATLAS_BRUSH
+	paper.material = ink
 	paper.mouse_filter = MOUSE_FILTER_IGNORE
 	chart.add_child(paper)
 	Atlas.fill(chart, Rect2(Vector2.ZERO, MAP_RECT.size), Color("#10181510"))
@@ -75,7 +82,7 @@ func make_chart() -> void:
 		marker.tooltip_text = "%s · %s" % [Route.ZONES[node.zone], Route.KIND_NAMES[node.kind]]
 		if marker.reachable:
 			marker.pressed.connect(pick.bind(node.id))
-			marker.focus_entered.connect(pick.bind(node.id))
+			marker.focus_entered.connect(focus_site.bind(node.id))
 		chart.add_child(marker)
 		markers[node.id] = marker
 	Atlas.label(self, "旧烽火道 · 从南向北", Rect2(24, 769, 380, 20), 13, Atlas.MUTED)
@@ -95,6 +102,7 @@ func chart_point(at: Vector2) -> Vector2:
 
 func set_chart_input_enabled(enabled: bool) -> void:
 	drag_chart = false
+	left_button_down = false
 	set_process_input(enabled)
 
 func _input(event: InputEvent) -> void:
@@ -102,7 +110,9 @@ func _input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton:
 		var inside := MAP_RECT.has_point(event.position)
-		if event.button_index == MOUSE_BUTTON_RIGHT:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			left_button_down = event.pressed
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			if not event.pressed and drag_chart:
 				drag_chart = false
 				get_viewport().set_input_as_handled()
@@ -141,6 +151,36 @@ func refresh_chart() -> void:
 		var marker: Marker = markers[node.id]
 		marker.position = chart_point(node.position) - marker.size * 0.5
 	route_layer.queue_redraw()
+	update_locate_site()
+
+func visible_chart() -> Rect2:
+	return Rect2(0, 0, SIDEBAR_X - MAP_RECT.position.x, MAP_RECT.size.y)
+
+func focus_site(id: int) -> void:
+	pick(id)
+	if left_button_down or chart_scale <= 1.0:
+		return
+	var marker: Marker = markers[id]
+	var center := marker.get_rect().get_center()
+	var frame := visible_chart().grow(-32.0)
+	var shift := center.clamp(frame.position, frame.end) - center
+	if not shift.is_zero_approx():
+		chart_offset += shift
+		refresh_chart()
+
+func center_selected_site() -> void:
+	var marker: Marker = markers.get(selected)
+	if marker == null:
+		return
+	chart_offset += visible_chart().get_center() - marker.get_rect().get_center()
+	refresh_chart()
+	marker.grab_focus()
+
+func update_locate_site() -> void:
+	if not is_instance_valid(locate_site):
+		return
+	var marker: Marker = markers.get(selected)
+	locate_site.visible = marker != null and not visible_chart().encloses(marker.get_rect())
 
 func draw_connections() -> void:
 	var ready: Array[Dictionary] = run.available_nodes()
@@ -158,7 +198,7 @@ func draw_connections() -> void:
 
 func make_sidebar() -> void:
 	var side := Control.new()
-	side.position = Vector2(989, 19)
+	side.position = Vector2(SIDEBAR_X, 19)
 	side.size = Vector2(275, 750)
 	side.mouse_filter = MOUSE_FILTER_IGNORE
 	add_child(side)
@@ -177,6 +217,8 @@ func make_sidebar() -> void:
 	if run.speed_bonus > 0.0:
 		next_night.append("敌速 +%d%%" % roundi(run.speed_bonus * 100.0))
 	Atlas.label(side, " · ".join(next_night), Rect2(31, 217, 223, 25), 13, Atlas.GOLD)
+	locate_site = Atlas.button(side, "回到所选", Rect2(153, 245, 92, 25), center_selected_site, false, 13)
+	locate_site.hide()
 	selection = Atlas.label(side, "", Rect2(30, 271, 214, 91), 28, Atlas.CREAM, true)
 	description = Atlas.label(side, "", Rect2(31, 367, 213, 113), 16, Atlas.MUTED)
 	confirm = Atlas.button(side, "前往", Rect2(30, 478, 215, 54), enter_selected, true, 18)
@@ -207,6 +249,7 @@ func update_selection() -> void:
 		marker.selected = selected == id
 		marker.queue_redraw()
 	route_layer.queue_redraw()
+	update_locate_site()
 	var node: Dictionary = run.get_node_data(selected)
 	confirm.disabled = node.is_empty()
 	if not node.is_empty():
