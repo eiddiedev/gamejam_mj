@@ -477,9 +477,8 @@ func closest(points: Array[Vector2], reach: float) -> int:
 	return index
 
 func support_muzzle(index: int) -> Vector2:
-	var site: Array = Maps.SUPPORTS[biome][index]
-	var depth := (float(site[1]) + 0.23) * scenery.model.PIXELS * cos(scenery.model.PITCH)
-	return slot_points[index] - Vector2(0, depth)
+	var fixture: Node3D = scenery.reliquary.contents[index]
+	return scenery.model.camera.unproject_position(fixture.to_global(Vector3(0.0, 0.23, 0.0)))
 
 func available_supply() -> int:
 	var nearest := -1

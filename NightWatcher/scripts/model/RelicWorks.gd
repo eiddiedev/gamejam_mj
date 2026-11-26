@@ -9,6 +9,7 @@ const BONE := Color("#c0b398")
 const BRASS := Color("#94775a")
 const CHAR := Color("#49352e")
 const OIL := Color("#885b39")
+const VALLEY_EYE_PIVOT := 0.66
 
 var ground
 var level
@@ -38,8 +39,13 @@ func setup(world: Node3D, field: Node2D) -> void:
 		var profile: String = site[2]
 		var details := Ink.new()
 		build_socket(details, profile)
+		var valley_eye: bool = level.biome == 0 and index == 1
+		if valley_eye:
+			eye_braces(details)
 		fittings.append(paint_mesh(details, rack))
 		var built := paint_mesh(Ink.new(), rack)
+		if valley_eye:
+			built.position.z = VALLEY_EYE_PIVOT
 		contents.append(built)
 		var bulk := StaticBody3D.new()
 		bulk.name = "Installed iron and timber collision"
@@ -157,6 +163,14 @@ func build_socket(mesh: RefCounted, profile: String) -> void:
 			for side in [-1.0,1.0]:
 				mesh.block(Vector3(side*0.44,-0.024,0),0.12,0.09,0.58,0,WROUGHT,0.028,0,false)
 				mesh.block(Vector3(0,-0.028,side*0.30),0.88,0.10,0.12,0,IRON,0.031,0,false)
+
+func eye_braces(mesh: RefCounted) -> void:
+	# The fittings are sunk into the orbit. The bow swivels at their exposed end,
+	# where a fully upgraded span can turn without scraping the cheekbone.
+	for x in [-0.14, 0.14]:
+		mesh.tube(PackedVector3Array([Vector3(x, -0.105, 0.03), Vector3(x, -0.082, 0.38),
+			Vector3(x, 0.065, VALLEY_EYE_PIVOT)]), PackedFloat32Array([0.065, 0.052, 0.045]), WROUGHT, 6)
+	mesh.block(Vector3(0, 0.038, VALLEY_EYE_PIVOT), 0.34, 0.081, 0.26, 0.0, IRON, 0.056, 0.0, false)
 
 func brazier(mesh: RefCounted, rank: int) -> void:
 	for index in range(3):

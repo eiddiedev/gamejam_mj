@@ -8,6 +8,9 @@ const DARK := Color("#2a3837")
 const RUST := Color("#a45736")
 const BARK := Color("#46514e")
 const Relief = preload("res://scripts/model/ReliefDetail.gd")
+const Ribs = preload("res://scripts/model/ValleyRibs.gd")
+const Arms = preload("res://scripts/model/ValleyArms.gd")
+const Cranium = preload("res://assets/props/fallen_king/valley_cranium.glb")
 
 static func build(world) -> void:
 	ridge(world)
@@ -64,68 +67,22 @@ static func ruins(world) -> void:
 	world.steps(Vector2(154,378),Vector2(115,337),28.0,0.67,8,STONE)
 
 static func skeleton(world) -> void:
-	world.sculpture("陨王 · 头骨与冠饰", func(): skull(world, Vector2(586,135), 1.0, true))
-	world.sculpture("陨王 · 椎骨与胸廓", func(): ribcage(world))
-	world.sculpture("陨王 · 臂骨与指节", func(): arms(world))
+	var skull_anchor: Vector3 = world.at(586, 135)
+	var skull_model := Cranium.instantiate() as Node3D
+	skull_model.name = "陨王 · 头骨"
+	skull_model.position = skull_anchor
+	world.add_child(skull_model)
+	var skull_meshes := skull_model.find_children("*", "MeshInstance3D", true, false)
+	if skull_model is MeshInstance3D:
+		skull_meshes.append(skull_model)
+	for part: MeshInstance3D in skull_meshes:
+		part.material_override = world.material
+		part.set_meta(&"walk_obstacle", true)
+	world.sculpture("陨王 · 冠饰", func(): crown(world, skull_anchor, 1.0))
+	world.sculpture("陨王 · 椎骨与胸廓", func(): Ribs.build(world))
+	world.sculpture("陨王 · 臂骨与指节", func(): Arms.build(world))
 
-static func ribcage(world) -> void:
-	var shade := MARROW.darkened(0.08)
-	var torso_start := Vector2(525,187)
-	var torso_end := Vector2(424,347)
-	for index in range(11):
-		var at := torso_start.lerp(torso_end,index / 10.0)
-		world.ellipsoid(world.from_floor(at,0.43),Vector3(0.38,0.33,0.28),world.weathered(MARROW,0.065),8,5)
-	for index in range(9):
-		var fraction := index / 8.0
-		var at := torso_start.lerp(torso_end,fraction)
-		var span := sin(0.37 + fraction * 2.46) * 1.0
-		for side in [-1.0,1.0]:
-			var width: float = (38.0 + 37.0 * span) * side
-			var body := PackedVector3Array([
-				world.from_floor(at,0.36),world.at(at.x + width * 0.41, at.y + 3,0.97),
-				world.at(at.x + width * 0.81, at.y + 17,1.10),
-				world.at(at.x + width, at.y + 38,0.48),
-				world.at(at.x + width * 0.79, at.y + 51,0.10)])
-			world.mesh.smooth_tube(body,PackedFloat32Array([0.13,0.17,0.16,0.11,0.030]),
-				world.weathered(BONE if side > 0 else shade,0.064),8,0.045,true)
-			if index % 3 != 1:
-				var tip := body[3] + Vector3.UP * 0.095
-				var join := body[2] + Vector3.UP * 0.162
-				world.pencil(PackedVector3Array([tip.lerp(join, 0.20), tip.lerp(join, 0.48) + Vector3.UP * 0.016,
-					tip.lerp(join, 0.75), join]), 0.017, MARROW.darkened(0.27))
-	world.ellipsoid(world.at(424,350,0.39),Vector3(0.78,0.35,0.44),BONE,10,6)
-	world.ellipsoid(world.at(443,361,0.24),Vector3(0.64,0.31,0.35),MARROW,9,6)
-
-static func arms(world) -> void:
-	# A displaced shoulder break creates a real walkable saddle to the eye socket.
-	bone(world,Vector2(532,187),Vector2(524,179),0.32,0.34)
-	bone(world,Vector2(490,153),Vector2(458,132),0.33,0.37)
-	var saddle: Array[Vector2] = [Vector2(478,194),Vector2(495,185),Vector2(507,167),Vector2(532,148),Vector2(554,161)]
-	world.trail(saddle, 7.4, Color("#69776c53"))
-	bone(world,Vector2(458,132),Vector2(396,153),0.30,0.32)
-	bone(world,Vector2(396,153),Vector2(420,91),0.18,0.26)
-	fingers(world,Vector2(420,91),-1.0)
-	bone(world,Vector2(554,218),Vector2(612,346),0.24,0.42)
-	bone(world,Vector2(612,346),Vector2(603,350),0.22,0.29)
-	bone(world,Vector2(554,374),Vector2(521,387),0.19,0.32)
-	var split: Array[Vector2] = [Vector2(512,400),Vector2(552,398),Vector2(578,359),Vector2(619,328)]
-	world.trail(split,9.0,Color("#6b796c53"))
-	fingers(world,Vector2(521,387),1.0)
-
-static func bone(world, start: Vector2, end: Vector2, h: float, radius: float) -> void:
-	var middle := start.lerp(end,0.46) + Vector2(5,-3)
-	var points := PackedVector3Array([world.from_floor(start,h*1.12),world.from_floor(middle,h*0.91),world.from_floor(end,h)])
-	world.mesh.smooth_tube(points,PackedFloat32Array([radius,radius*0.52,radius*0.92]),BONE,10,0.03,true)
-	world.ellipsoid(points[0],Vector3.ONE * radius * 1.1,MARROW,9,5)
-	world.ellipsoid(points[2],Vector3.ONE * radius,BONE,10,5)
-
-static func fingers(world, origin: Vector2, side: float) -> void:
-	for index in range(4):
-		var proximal := origin + Vector2(index * 4.5, (index-2)*3.9)
-		var tip := proximal + Vector2(-22.0 * side, 24.0 * side + index*3.0)
-		bone(world, proximal, tip, 0.19+index*0.037, 0.110)
-
-static func skull(world, at: Vector2, scale_factor: float, crowned: bool) -> void:
+static func skull(world, at: Vector2, scale_factor: float) -> void:
 	var anchor: Vector3 = world.from_floor(at)
 	var cream := BONE.lightened(0.045)
 	bone_shell(world, anchor, scale_factor, cream)
@@ -154,9 +111,6 @@ static func skull(world, at: Vector2, scale_factor: float, crowned: bool) -> voi
 		var z := 0.92 * sqrt(maxf(0.01,1.0 - pow(point.x/1.05,2.0) - pow((point.y-0.98)/1.15,2.0)))
 		seam.append(anchor + Vector3(point.x,point.y,z+0.027)*scale_factor)
 	world.pencil(seam,0.020*scale_factor,Color("#575e52"))
-	if crowned:
-		crown(world,anchor,scale_factor)
-
 static func bone_shell(world, anchor: Vector3, multiplier: float, tone: Color) -> void:
 	var previous := PackedVector3Array()
 	for latitude in range(20):
@@ -181,19 +135,50 @@ static func bone_shell(world, anchor: Vector3, multiplier: float, tone: Color) -
 		previous = local_ring
 
 static func crown(world, anchor: Vector3, s: float) -> void:
-	var copper := Color("#946a49")
+	var copper := Color("#817052")
+	var patina := Color("#4e6555")
+	var trim := Color("#ad8a54")
+	var washes: Array[Color] = []
 	for index in range(12):
-		var a := float(index)*TAU/12
-		var b := float(index+1)*TAU/12
-		var begin := anchor + Vector3(cos(a)*1.02,1.59,sin(a)*0.89)*s
-		var end := anchor + Vector3(cos(b)*1.02,1.59,sin(b)*0.89)*s
-		var raised := Vector3.UP*s*(0.38 if index%2 == 0 else 0.28)
-		world.mesh.quad(begin,end,end+raised,begin+raised,copper)
-		var p := begin.lerp(end,0.51) + raised
-		world.mesh.triangle(begin+raised,end+raised,p+Vector3.UP*s*(0.44 if index%2==0 else 0.25),
-			world.weathered(copper.lightened(0.13),0.10))
-		if index%3==0:
-			world.ellipsoid(p-Vector3.UP*s*0.16,Vector3(0.095,0.10,0.065)*s,Color("#254949"),7,5)
+		washes.append(world.weathered(copper, 0.055))
+	for index in range(20):
+		var a := float(index)*TAU/20
+		var b := float(index+1)*TAU/20
+		var base_a := crown_metal(anchor, s, a, 1.59, 0.046)
+		var base_b := crown_metal(anchor, s, b, 1.59, 0.046)
+		var lip_height := 1.76 if index != 10 else 1.71
+		var lip_a := crown_metal(anchor, s, a, lip_height, 0.039)
+		var lip_b := crown_metal(anchor, s, b, lip_height, 0.039)
+		var inner_a := crown_metal(anchor, s, a, lip_height, -0.015)
+		var inner_b := crown_metal(anchor, s, b, lip_height, -0.015)
+		var low_a := crown_metal(anchor, s, a, 1.59, -0.011)
+		var low_b := crown_metal(anchor, s, b, 1.59, -0.011)
+		var shade := 0.33 + 0.28 * sin(index * 2.7)
+		world.mesh.quad(base_a,base_b,lip_b,lip_a,washes[index % washes.size()].lerp(patina, shade))
+		world.mesh.quad(lip_a,lip_b,inner_b,inner_a,trim)
+		world.mesh.quad(low_b,low_a,inner_a,inner_b,copper.darkened(0.37))
+		world.mesh.quad(base_b,base_a,low_a,low_b,copper.darkened(0.31))
+		if index % 3 != 2:
+			continue
+		var middle := lerpf(a,b,0.46)
+		var raise := 2.02 + sin(index*1.95)*0.12
+		var peak := crown_metal(anchor,s,middle,raise,0.067)
+		var seam_a := crown_metal(anchor,s,lerpf(a,b,0.18),raise-0.07,0.058)
+		var seam_b := crown_metal(anchor,s,lerpf(a,b,0.76),raise-0.045,0.054)
+		world.mesh.quad(lip_a,lip_b,seam_b,seam_a,copper.lightened(0.07))
+		world.mesh.triangle(seam_a,seam_b,peak,trim)
+		var rim := lip_a.lerp(lip_b,0.46)
+		var radial := Vector3(cos(middle),0,sin(middle))
+		var framed := rim + radial * s * 0.027 - Vector3.UP * s * 0.062
+		world.ellipsoid(framed,Vector3(0.056,0.073,0.053)*s,trim.darkened(0.18),7,5)
+		world.ellipsoid(framed + radial*s*0.044,Vector3(0.041,0.053,0.042)*s,patina.darkened(0.42),7,5)
+
+static func crown_metal(anchor: Vector3, s: float, angle: float, height: float, offset: float) -> Vector3:
+	var bearing := height + sin(angle * 2.0 + 0.27) * 0.035
+	var across := sqrt(maxf(0.0, 1.0 - pow((minf(bearing, 1.76) - 1.13) / 0.99, 2.0)))
+	var tarnish := 0.009 * sin(angle * 4.0 + 0.4)
+	return anchor + Vector3(cos(angle) * (1.01 * across + offset + tarnish), bearing,
+		-0.105 + sin(angle) * (0.87 * across + offset + tarnish)) * s
 
 static func sword(world) -> void:
 	var tip: Vector3 = world.at(278,380,0.20)

@@ -24,7 +24,7 @@ static func build(world) -> void:
 			world.weathered(STONE,0.09),7,6)
 		world.stone(x,y+5,25,26,0.08,world.weathered(SNOW,0.08),0.2,height*1.06)
 	wall_walk(world)
-	Valley.skull(world,Vector2(152,221),1.35,false)
+	Valley.skull(world,Vector2(152,221),1.35)
 	world.ellipsoid(world.at(169,239,0.07),Vector3(2.04,0.22,1.52),FROST,13,6)
 	for index in range(37):
 		var at := Vector2(world.random.randf_range(33,696),world.random.randf_range(83,463))

@@ -12,7 +12,11 @@
 
 大陆行图以策划包的大地图为编辑对象，用内置图像生成工具重绘。当前贴图为 1451 × 1084，保留海岸线、区域位置和路线坐标。重绘提示要求用钢笔轮廓、少量排线和大片水粉色块，固定四区、城墙、巨骸和盘根古堡的位置，并去掉图中的文字与路线叠层。图内的路线和地区名由 Godot 绘制，随行图一起缩放和拖动。 [大陆行图](NightWatcher/assets/maps/00_world_overview_ink.png)
 
-四张区域插画记录构图和地标，保存在工程作为美术参考。战场几何分别在 [scripts/model](NightWatcher/scripts/model) 内构建，包含巨骸与锈剑、砂岩断崖与巨肋、枯树环堡与吊桥、黑曜长墙与裂隙晶簇。陨王头骨、胸廓和手臂是独立三维部件，碰撞基于各部件和地形的实际网格。
+四张区域插画记录构图和地标。战场几何分别在 [scripts/model](NightWatcher/scripts/model) 内构建，包含巨骸与锈剑、砂岩断崖与巨肋、枯树环堡与吊桥、黑曜长墙与裂隙晶簇。
+
+陨王巨骨由原创三维部件装配。头骨用体积雕刻生成，眼窝和颧骨下方有可见的凹腔和缺口，骨色写在网格顶点上。[头骨 GLB](NightWatcher/assets/props/fallen_king/valley_cranium.glb)
+
+胸廓和手臂分别用 Godot 生成，肋骨有不同的弧度和断面，前臂由两条长骨组成，手掌和手指分段成形。碰撞取自骨面网格，表面的铅笔线单独绘制。骨弩用支架固定在眼窝边，箭矢从模型上的挂点射出。[胸廓模型](NightWatcher/scripts/model/ValleyRibs.gd) · [手臂模型](NightWatcher/scripts/model/ValleyArms.gd)
 
 [战场着色器](NightWatcher/scripts/model/battle_model.gdshader) 给模型叠加色洗与铅笔纹理。深度描边随模型遮挡。篝火、提灯和火龛给实时三维模型打光，[LightManager](NightWatcher/scripts/battle/LightManager.gd) 沿着实际地形网格检测光线是否被挡住。陨王遗谷的地面暖光、树根和石沿亮边随篝火火势淡出。护具、武器和敌人关节由代码构建，配合奔跑、挥击、受击和短暂停顿。环境工事的实物模型在 [RelicWorks](NightWatcher/scripts/model/RelicWorks.gd) 中绘制。
 
