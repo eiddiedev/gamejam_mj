@@ -14,9 +14,7 @@
 
 四张区域插画记录构图和地标。战场几何分别在 [scripts/model](NightWatcher/scripts/model) 内构建，包含巨骸与锈剑、砂岩断崖与巨肋、枯树环堡与吊桥、黑曜长墙与裂隙晶簇。
 
-陨王巨骨由原创三维部件装配。头骨用体积雕刻生成，眼窝和颧骨下方有可见的凹腔和缺口，骨色写在网格顶点上。[头骨 GLB](NightWatcher/assets/props/fallen_king/valley_cranium.glb)
-
-胸廓和手臂分别用 Godot 生成，肋骨有不同的弧度和断面，前臂由两条长骨组成，手掌和手指分段成形。碰撞取自骨面网格，表面的铅笔线单独绘制。骨弩用支架固定在眼窝边，箭矢从模型上的挂点射出。[胸廓模型](NightWatcher/scripts/model/ValleyRibs.gd) · [手臂模型](NightWatcher/scripts/model/ValleyArms.gd)
+陨王巨骨的头骨、胸廓和手臂分别用 Tripo Studio 生成，在 Blender 调整姿态和尺寸后以 GLB 导入。胸廓和手臂先合并接缝处重合的顶点，再减面，保留完整的肋骨弧线和指缝。底色贴图与战场的哑光色洗、实时描边叠加。王冠沿头骨实测截面重新贴合，骨弩固定在左眼凹腔，箭矢从弩机上的挂点射出。Godot 以装配后的网格三角面生成碰撞，保留骨面之间的通路。 [装配](NightWatcher/scripts/model/FallenKing.gd) · [头骨 GLB](NightWatcher/assets/props/fallen_king/valley_tripo_cranium.glb) · [胸廓 GLB](NightWatcher/assets/props/fallen_king/valley_tripo_ribs.glb) · [手臂 GLB](NightWatcher/assets/props/fallen_king/valley_tripo_arm.glb)
 
 黑曜长墙由连续的斜面石墙、扶壁、墙顶步道和断垛组成，石缝跟着墙面画。两道拱门都能让巡夜人穿过，身形更高的敌人会被门楣挡住。半埋裂颅的霜层、凹陷眼窝和破损金属箍沿颅骨形体绘制，眼窝保留骨弩安装点。 [长墙模型](NightWatcher/scripts/model/Obsidian.gd) · [裂颅模型](NightWatcher/scripts/model/ObsidianRelic.gd)
 

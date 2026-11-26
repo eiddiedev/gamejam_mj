@@ -81,7 +81,7 @@ godot --headless --path NightWatcher --script res://tests/collision_smoke.gd
 godot --headless --path NightWatcher --script res://tests/impact_smoke.gd
 ```
 
-当前战役进度保存在运行内存。陨王遗谷已细化头骨、胸廓和手臂，并接入战场碰撞。头骨可从 GLB 单独编辑，胸廓和手臂各用一份 Godot 模型脚本。
+当前战役进度保存在运行内存。陨王的头骨、胸廓和手臂是三份独立的 Tripo GLB，可分别编辑。Godot 从装配后的网格生成碰撞。替换部件后用碰撞测试复查左眼骨弩的安装与射击，以及不同体型从骨缝经过的路线。 [巨骨资产](NightWatcher/assets/props/fallen_king)
 
 ## 同仓库的《跨时空守望》
 

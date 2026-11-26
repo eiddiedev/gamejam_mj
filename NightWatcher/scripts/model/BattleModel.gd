@@ -155,7 +155,7 @@ func animate(clock: float, bridge_closed: int, crystals: Array[Dictionary]) -> v
 	for index in range(crystal_nodes.size()):
 		crystal_nodes[index].visible = crystals[index]["hp"] > 0.0
 
-func paint_textured_prop(prop: Node3D) -> void:
+func paint_textured_prop(prop: Node3D, tint := Color.WHITE) -> void:
 	var surfaces := prop.find_children("*", "MeshInstance3D", true, false)
 	if prop is MeshInstance3D:
 		surfaces.append(prop)
@@ -169,7 +169,7 @@ func paint_textured_prop(prop: Node3D) -> void:
 			var brush := material.duplicate() as ShaderMaterial
 			brush.set_shader_parameter("has_pigment_atlas", true)
 			brush.set_shader_parameter("pigment_atlas", imported.albedo_texture)
-			brush.set_shader_parameter("pigment_tint", imported.albedo_color)
+			brush.set_shader_parameter("pigment_tint", imported.albedo_color * tint)
 			surface.set_surface_override_material(index, brush)
 
 func relight(night: bool, fuel: float, clock: float) -> void:
@@ -531,7 +531,8 @@ func tuft(center: Vector2, height: float, tint: Color) -> void:
 		var across := Vector3(-bend.z,0,bend.x) * 0.023
 		var base := origin + bend * 0.033
 		var tip := base + bend * height * 0.67 + Vector3.UP * height * (0.72 + index * 0.095)
-		mesh.triangle(base-across,base+across,tip,tint,Vector3.UP)
+		# Grass bends underfoot. Reserve the terrain mesh for solid surfaces.
+		contour.triangle(base-across,base+across,tip,tint,Vector3.UP)
 
 func make_drawbridges() -> void:
 	for index in range(layout["bridges"].size()):

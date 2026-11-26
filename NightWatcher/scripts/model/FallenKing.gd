@@ -5,9 +5,16 @@ const STONE := Color("#65736b")
 const RUST := Color("#a45736")
 const BARK := Color("#46514e")
 const Relief = preload("res://scripts/model/ReliefDetail.gd")
-const Ribs = preload("res://scripts/model/ValleyRibs.gd")
-const Arms = preload("res://scripts/model/ValleyArms.gd")
-const Cranium = preload("res://assets/props/fallen_king/valley_cranium.glb")
+const Cranium = preload("res://assets/props/fallen_king/valley_tripo_cranium.glb")
+const Thorax = preload("res://assets/props/fallen_king/valley_tripo_ribs.glb")
+const Limbs = preload("res://assets/props/fallen_king/valley_tripo_arm.glb")
+# Radius of the cranium at the lower and upper edges of each crown segment.
+const CROWN_RADII := [
+	Vector2(0.873, 0.758), Vector2(0.848, 0.726), Vector2(0.866, 0.764), Vector2(0.873, 0.779), Vector2(0.881, 0.778),
+	Vector2(0.858, 0.774), Vector2(0.881, 0.791), Vector2(0.886, 0.814), Vector2(0.843, 0.801), Vector2(0.868, 0.773),
+	Vector2(0.873, 0.764), Vector2(0.896, 0.732), Vector2(0.860, 0.689), Vector2(0.801, 0.648), Vector2(0.768, 0.638),
+	Vector2(0.774, 0.644), Vector2(0.795, 0.668), Vector2(0.834, 0.721), Vector2(0.886, 0.756), Vector2(0.912, 0.754),
+]
 
 static func build(world) -> void:
 	underpaint(world)
@@ -104,19 +111,27 @@ static func ruins(world) -> void:
 
 static func skeleton(world) -> void:
 	var skull_anchor: Vector3 = world.at(586, 135)
-	var skull_model := Cranium.instantiate() as Node3D
-	skull_model.name = "陨王 · 头骨"
-	skull_model.position = skull_anchor
-	world.add_child(skull_model)
-	var skull_meshes := skull_model.find_children("*", "MeshInstance3D", true, false)
-	if skull_model is MeshInstance3D:
-		skull_meshes.append(skull_model)
-	for part: MeshInstance3D in skull_meshes:
-		part.material_override = world.material
-		part.set_meta(&"walk_obstacle", true)
+	var shoulder: Vector3 = world.at(525, 187)
+	place_bone(world, Cranium, "陨王 · 头骨", skull_anchor, Color("#adaa92"))
 	world.sculpture("陨王 · 冠饰", func(): crown(world, skull_anchor, 1.0))
-	world.sculpture("陨王 · 椎骨与胸廓", func(): Ribs.build(world))
-	world.sculpture("陨王 · 臂骨与指节", func(): Arms.build(world))
+	place_bone(world, Thorax, "陨王 · 胸廓", shoulder, Color("#b6ae94"))
+	place_bone(world, Limbs, "陨王 · 臂骨与指节", shoulder, Color("#b6ae94"))
+	var saddle: Array[Vector2] = [Vector2(478, 194), Vector2(495, 185), Vector2(507, 167), Vector2(532, 148), Vector2(554, 161)]
+	var split: Array[Vector2] = [Vector2(512, 400), Vector2(552, 398), Vector2(578, 359), Vector2(619, 328)]
+	world.trail(saddle, 7.4, Color("#69776c53"))
+	world.trail(split, 9.0, Color("#6b796c53"))
+
+static func place_bone(world, scene: PackedScene, label: String, anchor: Vector3, tint: Color) -> void:
+	var bone := scene.instantiate() as Node3D
+	bone.name = label
+	bone.position = anchor
+	world.add_child(bone)
+	world.paint_textured_prop(bone, tint)
+	var meshes := bone.find_children("*", "MeshInstance3D", true, false)
+	if bone is MeshInstance3D:
+		meshes.append(bone)
+	for part: MeshInstance3D in meshes:
+		part.set_meta(&"walk_obstacle", true)
 
 static func crown(world, anchor: Vector3, s: float) -> void:
 	var copper := Color("#817052")
@@ -159,10 +174,13 @@ static func crown(world, anchor: Vector3, s: float) -> void:
 
 static func crown_metal(anchor: Vector3, s: float, angle: float, height: float, offset: float) -> Vector3:
 	var bearing := height + sin(angle * 2.0 + 0.27) * 0.035
-	var across := sqrt(maxf(0.0, 1.0 - pow((minf(bearing, 1.76) - 1.13) / 0.99, 2.0)))
+	var at := fposmod(angle, TAU) * CROWN_RADII.size() / TAU
+	var segment := floori(at)
+	var profile: Vector2 = CROWN_RADII[segment % CROWN_RADII.size()].lerp(
+		CROWN_RADII[(segment + 1) % CROWN_RADII.size()], at - segment)
 	var tarnish := 0.009 * sin(angle * 4.0 + 0.4)
-	return anchor + Vector3(cos(angle) * (1.01 * across + offset + tarnish), bearing,
-		-0.105 + sin(angle) * (0.87 * across + offset + tarnish)) * s
+	var radius := lerpf(profile.x, profile.y, clampf((height - 1.59) / 0.17, 0.0, 1.0)) + offset + tarnish
+	return anchor + Vector3(cos(angle) * radius, bearing, -0.105 + sin(angle) * radius) * s
 
 static func sword(world) -> void:
 	var tip: Vector3 = world.at(278,380,0.20)
