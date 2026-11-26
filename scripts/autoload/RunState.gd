@@ -1,6 +1,7 @@
 extends Node
 
 const Route = preload("res://scripts/campaign/Route.gd")
+const RelicDef = preload("res://scripts/data/RelicData.gd")
 const TOWERS := { "brazier": "烽火盆", "ballista": "骨弩台", "barricade": "誓言路障", "oil": "火油槽" }
 const RELICS := {
 	"守火铜环": "每场胜利后额外补回十二点基准火势。",
@@ -9,6 +10,7 @@ const RELICS := {
 	"极北余辉": "每场胜利额外收获十点余烬。",
 }
 
+var relic_defs: Dictionary[String, RelicDef] = {}
 var cycle := 1
 var embers := 68
 var bone := 38
@@ -25,6 +27,13 @@ var current_node := -1
 var active_node := -1
 var victories := 0
 var battle_reserve: Dictionary = {}
+
+func _init() -> void:
+	for id: String in RELICS:
+		relic_defs[id] = RelicDef.create(id, RELICS[id])
+
+func get_relic_data(id: String) -> RelicDef:
+	return relic_defs[id] if relic_defs.has(id) else null
 
 func start_new() -> void:
 	cycle = 1

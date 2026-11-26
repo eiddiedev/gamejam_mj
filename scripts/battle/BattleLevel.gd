@@ -9,6 +9,10 @@ const Waves = preload("res://scripts/battle/WaveSpawner.gd")
 const Lights = preload("res://scripts/battle/LightManager.gd")
 const Scenery = preload("res://scripts/battle/BattleArt.gd")
 const Collision = preload("res://scripts/battle/BattleCollision.gd")
+const Hazards = preload("res://scripts/battle/BiomeHazardSystem.gd")
+const AudioSys = preload("res://scripts/battle/BattleAudio.gd")
+const InputSys = preload("res://scripts/battle/BattleInput.gd")
+const ViewState = preload("res://scripts/data/BattleViewState.gd")
 const Combat = preload("res://scripts/entities/Combat.gd")
 const HUD = preload("res://scenes/ui/BattleHUD.tscn")
 const NightGift = preload("res://scenes/ui/NightGiftPanel.gd")
@@ -31,6 +35,9 @@ var scenery: Scenery
 var collision := Collision.new()
 var light_manager: Lights
 var shade: CanvasModulate
+var hazards := Hazards.new()
+var audio_sys: AudioSys
+var input_sys := InputSys.new()
 var paths: Array[PackedVector2Array] = []
 var detours: Array[PackedVector2Array] = []
 var slot_points: Array[Vector2] = []
@@ -57,12 +64,6 @@ var lantern_on := true
 var night := false
 var night_age := 0.0
 var clock := 0.0
-var weather_age := 0.0
-var weather_left := 0.0
-var crystal_pulse := 0.0
-var crystal_power := 0.0
-var bridge_closed := -1
-var bridge_cooldown := 0.0
 var show_routes := false
 var paused := false
 var ended := false
@@ -71,7 +72,6 @@ var open_slot := -1
 var still := 0.0
 var visual_elapsed := 0.0
 var ready_to_exit := false
-var attack_held := false
 var perks := {"edge": 0, "lamp": 0, "step": 0, "blood": 0}
 var night_rank := 1
 var rank_previous := 0
@@ -79,14 +79,41 @@ var rank_target := 14
 var perk_open := false
 var perk_pending := false
 var gift_panel: NightGift
-var ambience: AudioStreamPlayer
-var cue: AudioStreamPlayer
+
+var weather_age: float:
+	get: return hazards.weather_age
+	set(value): hazards.weather_age = value
+var weather_left: float:
+	get: return hazards.weather_left
+	set(value): hazards.weather_left = value
+var crystal_pulse: float:
+	get: return hazards.crystal_pulse
+	set(value): hazards.crystal_pulse = value
+var crystal_power: float:
+	get: return hazards.crystal_power
+	set(value): hazards.crystal_power = value
+var bridge_closed: int:
+	get: return hazards.bridge_closed
+	set(value): hazards.bridge_closed = value
+var bridge_cooldown: float:
+	get: return hazards.bridge_cooldown
+	set(value): hazards.bridge_cooldown = value
+var attack_held: bool:
+	get: return input_sys.attack_held
+	set(value): input_sys.attack_held = value
+var ambience: AudioStreamPlayer:
+	get: return audio_sys.ambience
+var cue: AudioStreamPlayer:
+	get: return audio_sys.cue
+
 
 func _ready() -> void:
 	run = get_node("/root/RunState")
 	fire_hp = clampf(run.fire_start, 1.0, 100.0)
 	oil = clampf(run.oil_start, 0.0, 100.0)
 	install_layout()
+	hazards.setup(self)
+	input_sys.setup(self)
 	shade = CanvasModulate.new()
 	shade.color = Color("#cbcbb7")
 	add_child(shade)
@@ -121,9 +148,12 @@ func _ready() -> void:
 	hud.return_requested.connect(leave_battle)
 	hud.result_requested.connect(acknowledge_battle)
 	hud.announce("趁天还有光，先搜集余烬和骨材。靠近遗迹可按 E 修缮。")
-	make_audio()
+	audio_sys = AudioSys.new()
+	add_child(audio_sys)
+	audio_sys.setup()
 	refresh_lights()
 	refresh_view()
+
 
 func install_layout() -> void:
 	var layout: Dictionary = Maps.MAPS[biome]
@@ -154,6 +184,7 @@ func install_layout() -> void:
 		add_child(path)
 	place_supplies(false)
 
+
 func place_supplies(second: bool) -> void:
 	supplies.clear()
 	var places: Array = Maps.MAPS[biome]["supply"]
@@ -162,6 +193,7 @@ func place_supplies(second: bool) -> void:
 		var bones := (index + int(second)) % 3 != 0
 		supplies.append({"position": at, "available": true, "embers": 9 if bones else 14,
 			"bone": 7 if bones else 0, "phase": index * 0.43})
+
 
 func _physics_process(delta: float) -> void:
 	if paused or ended:
@@ -201,10 +233,9 @@ func _physics_process(delta: float) -> void:
 		visual_elapsed = 0.0
 		refresh_view()
 
+
 func move_watcher(delta: float) -> void:
-	var horizontal := float(Input.is_physical_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT)) - float(Input.is_physical_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT))
-	var vertical := float(Input.is_physical_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN)) - float(Input.is_physical_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP))
-	var direction := Vector2(horizontal, vertical).normalized()
+	var direction := input_sys.read_move_direction()
 	still = still + delta if direction.is_zero_approx() else 0.0
 	if not direction.is_zero_approx():
 		var modifiers: Dictionary = OathDatabase.player_modifiers(run.oaths, player.distance_to(fire_point), fire_hp)
@@ -221,27 +252,31 @@ func move_watcher(delta: float) -> void:
 	if open_slot >= 0 and player.distance_to(slot_points[open_slot]) > SLOT_REACH + 16.0:
 		close_build()
 
+
 func can_walk(at: Vector2) -> bool:
 	return collision.can_stand(at, PLAYER_RADIUS)
+
 
 func motion_against_world(start: Vector2, motion: Vector2, radius: float, airborne := false) -> Vector2:
 	return collision.sweep(start, motion, radius, airborne)
 
+
 func route_for_actor(lane: int, radius := 15.0) -> PackedVector2Array:
 	return collision.route(lane, enemy_path(lane), radius)
 
+
 func find_motion_path(from: Vector2, to: Vector2, radius: float, airborne := false) -> PackedVector2Array:
 	return collision.search(from, to, radius, airborne)
+
 
 func register_environment_collision(instances: Array[MeshInstance3D]) -> void:
 	if not instances.is_empty():
 		collision.register_meshes(instances)
 
+
 func pace_factor(at: Vector2) -> float:
-	for shape in mud:
-		if Geometry2D.is_point_in_polygon(at, shape):
-			return 0.75
-	return 1.0
+	return hazards.pace_factor(at)
+
 
 func start_night() -> void:
 	if ended or paused or night:
@@ -250,8 +285,7 @@ func start_night() -> void:
 	phases.start_night()
 	night = true
 	night_age = 0.0
-	weather_age = 0.0
-	weather_left = 0.0
+	hazards.reset_weather()
 	show_routes = false
 	spawner.prepare(biome, phases.night_number, elite, boss, run.cycle)
 	combat.reset_night()
@@ -259,18 +293,19 @@ func start_night() -> void:
 	announce("夜幕合拢。提灯扫暗处，挥剑护住篝火。")
 	refresh_view()
 
+
 func next_dusk() -> void:
 	phases.next_dusk()
 	night = false
 	night_age = 0.0
-	weather_left = 0.0
-	weather_age = 0.0
+	hazards.reset_weather()
 	place_supplies(true)
 	run.embers += 16
 	run.bone += 9
 	show_routes = false
 	play_cue("dusk")
 	announce("天将再暗。趁喘息之际，搜补给、添火、修营。")
+
 
 func spawn_arrival(kind: int, lane: int) -> void:
 	var enemy = combat.spawn(kind, lane)
@@ -279,10 +314,12 @@ func spawn_arrival(kind: int, lane: int) -> void:
 		enemy.position = enemy.path[waypoint]
 		enemy.waypoint = waypoint + 1
 
+
 func on_enemy_slain(_species: int, _experience: int, _where: Vector2) -> void:
 	if not ended and not perk_open and not perk_pending and night_rank < 5 and combat.xp >= rank_target:
 		perk_pending = true
 		open_night_perks.call_deferred()
+
 
 func open_night_perks() -> void:
 	perk_pending = false
@@ -291,11 +328,12 @@ func open_night_perks() -> void:
 	perk_open = true
 	cancel_pointer_attack()
 	paused = true
-	hud.update_status(self)
+	sync_hud()
 	gift_panel = NightGift.new()
 	add_child(gift_panel)
 	gift_panel.chosen.connect(choose_night_perk, CONNECT_ONE_SHOT)
 	gift_panel.show_choices(night_rank, perks)
+
 
 func choose_night_perk(id: String) -> void:
 	if not perk_open or not perks.has(id):
@@ -317,95 +355,46 @@ func choose_night_perk(id: String) -> void:
 	play_cue("fuel")
 	refresh_view()
 
+
 func enemy_path(lane: int) -> PackedVector2Array:
-	if biome == 2 and bridge_closed >= 0 and int(lane > 0) == bridge_closed:
-		return detours[lane]
-	return paths[lane]
+	return hazards.enemy_path(lane)
+
 
 func tick_environment(delta: float) -> void:
-	weather_left = maxf(0.0, weather_left - delta)
-	crystal_pulse = maxf(0.0, crystal_pulse - delta)
-	crystal_power = maxf(0.0, crystal_power - delta)
-	bridge_cooldown = maxf(0.0, bridge_cooldown - delta)
-	if not night or biome == 2:
-		return
-	weather_age += delta
-	var period: float = [40.0, 45.0, 0.0, 30.0][biome]
-	if weather_age < period:
-		return
-	weather_age -= period
-	match biome:
-		0:
-			weather_left = 8.0
-			announce("苔沼迷雾升起 · 所有光照半径缩小 30%")
-		1:
-			weather_left = 7.0
-			for index in outer_slots:
-				var outer: Vector2 = slot_points[index]
-				var shielded: bool = combat.towers.any(func(tower): return tower.kind == "barricade" and tower.health > 0.0 and tower.position.distance_to(outer) <= 110.0)
-				if not shielded:
-					combat.extinguish_index(index)
-			announce("沙暴抵达 · 无路障挡风的外侧火盆熄灭")
-		3:
-			crystal_pulse = 1.2
-			crystal_power = 7.0
-			weather_left = 7.0
-			announce("裂隙脉冲 · 晶簇附近的怪物得到移速与护甲强化")
+	hazards.tick(delta)
+
 
 func is_harsh_weather() -> bool:
-	return (biome == 0 and weather_left > 0.0) or biome == 3
+	return hazards.is_harsh_weather()
+
 
 func night_fraction() -> float:
 	return clampf(night_age / Timekeeping.NIGHT_TIME, 0.0, 1.0)
 
+
 func crystal_buff_at(at: Vector2) -> bool:
-	if crystal_power <= 0.0:
-		return false
-	for crystal in crystals:
-		if crystal["hp"] > 0.0 and at.distance_squared_to(crystal["position"]) <= 162.0 ** 2:
-			return true
-	return false
+	return hazards.crystal_buff_at(at)
+
 
 func damage_crystal(index: int, damage: float) -> void:
-	var crystal := crystals[index]
-	if crystal["hp"] <= 0.0:
-		return
-	crystal["hp"] = maxf(0.0, crystal["hp"] - damage)
-	if crystal["hp"] == 0.0:
-		run.bone += 5
-		announce("裂隙晶簇已摧毁")
+	hazards.damage_crystal(index, damage)
+
 
 func damage_crystals_at(origin: Vector2, facing: Vector2, reach: float, damage: float) -> void:
-	for index in range(crystals.size()):
-		var delta: Vector2 = crystals[index]["position"] - origin
-		if delta.length() <= reach and (delta.length() < 20.0 or facing.dot(delta.normalized()) > 0.33):
-			damage_crystal(index, damage)
+	hazards.damage_crystals_at(origin, facing, reach, damage)
+
 
 func use_bridge() -> void:
-	if biome != 2 or bridge_cooldown > 0.0:
-		return
-	var lever := closest(levers, 68.0)
-	if lever < 0:
-		return
-	var raised := 1 - bridge_closed if bridge_closed >= 0 else lever
-	if collision.occupies_bridge(raised, player, PLAYER_RADIUS, 2.0):
-		announce("先走下桥面，再拉动机关。")
-		return
-	for foe in combat.enemies:
-		if not foe.removed and foe.kind != Combat.Enemy.MOTH and collision.occupies_bridge(raised, foe.position, foe.radius, 2.0):
-			announce("桥面上有敌人，等它离开后再拉动机关。")
-			return
-	bridge_closed = raised
-	bridge_cooldown = 15.0
-	var open_routes: Array[PackedVector2Array] = []
-	for lane in range(paths.size()):
-		open_routes.append(enemy_path(lane))
-	collision.set_bridge(raised, open_routes)
-	combat.reroute()
-	announce("西桥升起，敌人转向东岸" if bridge_closed == 0 else "东桥升起，敌人转向西岸")
+	hazards.use_bridge()
+
 
 func light_radius_scale() -> float:
-	return 0.70 if biome == 0 and weather_left > 0.0 else 1.0
+	return hazards.light_radius_scale()
+
+
+func weather_status() -> String:
+	return hazards.weather_status()
+
 
 func refresh_lights() -> void:
 	var active: Array[Dictionary] = []
@@ -432,6 +421,92 @@ func refresh_lights() -> void:
 		chains.append(link)
 	light_manager.set_sources(active, chains)
 
+
+func build_view_state() -> ViewState:
+	var state := ViewState.new()
+	state.night = night
+	state.night_number = phases.night_number
+	state.phase_left = phases.left
+	state.phase_progress = phases.progress()
+	state.fire_hp = fire_hp
+	state.oil = oil
+	state.embers = run.embers
+	state.bone = run.bone
+	state.spawner_remaining = spawner.remaining()
+	state.live_enemies = combat.count_enemies()
+	state.player_hp = combat.player_hp
+	state.player_hp_max = combat.player_hp_max
+	state.xp = combat.xp
+	state.rank_previous = rank_previous
+	state.rank_target = rank_target
+	state.night_rank = night_rank
+	state.kills = combat.kills
+	state.ended = ended
+	state.paused = paused
+	state.weather_text = weather_status()
+	state.action_hint = action_hint()
+	populate_inspection(state)
+	return state
+
+
+func populate_inspection(state: ViewState) -> void:
+	if paused or ended:
+		return
+	var selecting: bool = open_slot >= 0 and hud.is_menu_open()
+	var selected: int = open_slot if selecting else hovered_support()
+	if selected < 0:
+		return
+	var tower = combat.towers[selected]
+	var radius: float = combat.inspect_radius(selected)
+	var current := radius
+	var planned := 0.0
+	if tower.level == 0 or (tower.kind == "brazier" and not tower.lit) or (tower.kind == "oil" and tower.spent and tower.burn <= 0.0):
+		planned = current
+		current = 0.0
+	elif selecting and tower.level < 3:
+		planned = combat.inspect_radius(selected, true)
+	state.inspect_visible = true
+	state.inspect_selecting = selecting
+	state.inspect_at = slot_points[selected]
+	state.inspect_marker = get_global_transform_with_canvas() * support_muzzle(selected)
+	state.inspect_radius = radius
+	state.inspect_current = current
+	state.inspect_planned = planned
+	state.inspect_title = support_name[selected]
+	state.inspect_level = tower.level
+
+
+func hovered_support() -> int:
+	var cursor: Vector2 = get_global_mouse_position()
+	var selected := -1
+	var nearest := 25.0 ** 2
+	for index in slot_points.size():
+		var distance := cursor.distance_squared_to(slot_points[index])
+		distance = minf(distance, cursor.distance_squared_to(support_muzzle(index)))
+		if distance < nearest:
+			nearest = distance
+			selected = index
+	return selected
+
+
+func sync_hud() -> void:
+	var state := build_view_state()
+	if state.inspect_visible:
+		scenery.show_support_range(state.inspect_at, state.inspect_current, state.inspect_planned)
+	else:
+		scenery.hide_support_range()
+	hud.apply_state(state)
+
+
+func sync_inspection() -> void:
+	var state := build_view_state()
+	if state.inspect_visible:
+		scenery.show_support_range(state.inspect_at, state.inspect_current, state.inspect_planned)
+	else:
+		scenery.hide_support_range()
+	hud.apply_inspection(state)
+
+
 func refresh_view() -> void:
 	var dark := Color("#647791") if night else Color("#d0d3bb")
 	if weather_left > 0.0 and biome == 0:
@@ -439,7 +514,8 @@ func refresh_view() -> void:
 	shade.color = shade.color.lerp(dark, 0.23)
 	light_manager.refresh_visuals(clock)
 	scenery.update_art()
-	hud.update_status(self)
+	sync_hud()
+
 
 func hurt_fire(amount: float, enemy_hit := false) -> void:
 	if ended:
@@ -450,102 +526,44 @@ func hurt_fire(amount: float, enemy_hit := false) -> void:
 	if fire_hp <= 0.0:
 		finish_battle(false)
 
+
 func heal_fire(amount: float) -> void:
 	if not ended:
 		fire_hp = minf(100.0, fire_hp + amount)
 
+
 func announce(words: String) -> void:
 	hud.announce(words)
 
-func weather_status() -> String:
-	if not night:
-		return Maps.RULES[biome]
-	if biome == 0 and weather_left > 0.0:
-		return "苔雾  ·  光照范围 ×0.70"
-	if biome == 1 and weather_left > 0.0:
-		return "沙暴  ·  外侧火盆需路障挡风"
-	if biome == 2:
-		return "吊桥机关  ·  %s" % ("可切换" if bridge_cooldown <= 0 else "%d 秒后可切换" % ceili(bridge_cooldown))
-	if biome == 3:
-		return "极北风雪  ·  篝火衰减 ×2"
-	return ""
 
 func closest(points: Array[Vector2], reach: float) -> int:
-	var index := -1
-	var best := reach ** 2
-	for candidate in range(points.size()):
-		var distance := player.distance_squared_to(points[candidate])
-		if distance < best:
-			index = candidate
-			best = distance
-	return index
+	return input_sys.closest(points, reach)
+
 
 func support_muzzle(index: int) -> Vector2:
 	var fixture: Node3D = scenery.reliquary.contents[index]
 	return scenery.model.camera.unproject_position(fixture.to_global(Vector3(0.0, 0.23, 0.0)))
 
+
 func available_supply() -> int:
-	var nearest := -1
-	var best := 37.0 ** 2
-	for index in range(supplies.size()):
-		var pile := supplies[index]
-		var distance := player.distance_squared_to(pile["position"])
-		if pile["available"] and distance < best:
-			best = distance
-			nearest = index
-	return nearest
+	return input_sys.available_supply()
+
 
 func action_hint() -> String:
-	if available_supply() >= 0:
-		return "E  拾取余烬与骨材"
-	if player.distance_to(fire_point) <= CAMP_REACH and (fire_hp < 100.0 or needs_preparation()):
-		return "E 添火（%d 余烬）  ·  Q 营火整备（%d 余烬）" % [FUEL_COST, OIL_COST]
-	var index := closest(slot_points, SLOT_REACH)
-	if index >= 0:
-		return combat.slot_hint(index, true) if night else "E · " + support_name[index]
-	if biome == 2 and closest(levers, 68.0) >= 0:
-		return "R  切换吊桥路线"
-	return ""
+	return input_sys.action_hint()
+
 
 func interact() -> void:
-	if open_slot >= 0:
-		close_build()
-		return
-	var supply := available_supply()
-	if supply >= 0:
-		var item := supplies[supply]
-		item["available"] = false
-		run.embers += item["embers"]
-		run.bone += item["bone"]
-		play_cue("wood")
-		announce("收取  %d 余烬  /  %d 骨材" % [item["embers"], item["bone"]])
-		return
-	if player.distance_to(fire_point) <= CAMP_REACH and fire_hp < 100.0:
-		if run.embers >= FUEL_COST:
-			run.embers -= FUEL_COST
-			heal_fire(22.0)
-			combat.ember_spent("fuel")
-			play_cue("fuel")
-		else:
-			announce("余烬不足，无法添火")
-		return
-	var index := closest(slot_points, SLOT_REACH)
-	if index >= 0:
-		if night:
-			combat.service_slot(index)
-		else:
-			open_build(index)
+	input_sys.interact()
+
 
 func borrow_fire() -> void:
-	if player.distance_to(fire_point) <= CAMP_REACH and needs_preparation() and run.embers >= OIL_COST:
-		run.embers -= OIL_COST
-		oil = minf(100.0, oil + 52.0)
-		combat.player_hp = minf(combat.player_hp_max, combat.player_hp + 35.0)
-		lantern_on = true
-		announce("营火整备 · 补灯油，恢复生命")
+	input_sys.borrow_fire()
+
 
 func needs_preparation() -> bool:
-	return oil < 100.0 or combat.player_hp < combat.player_hp_max
+	return input_sys.needs_preparation()
+
 
 func open_build(index: int) -> void:
 	cancel_pointer_attack()
@@ -555,72 +573,36 @@ func open_build(index: int) -> void:
 		item["compatible"] = item["kind"] == support_kind[index]
 		item["site"] = support_name[index]
 	hud.open_build(options, combat.upgrade_options(index), index, support_muzzle(index))
-	hud.update_inspection(self)
+	sync_inspection()
+
 
 func close_build() -> void:
 	open_slot = -1
 	hud.close_build()
-	hud.update_inspection(self)
+	sync_inspection()
+
 
 func build_selected(kind: int) -> void:
 	if not night and not ended and open_slot >= 0 and support_kind[open_slot] == TOWER_IDS[kind] and combat.build(open_slot, TOWER_IDS[kind]):
 		close_build()
 
+
 func upgrade_selected() -> void:
 	if not night and not ended and open_slot >= 0 and combat.upgrade(open_slot):
 		close_build()
 
+
 func _input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed and attack_held:
-		attack_held = false
-		if not ended and not paused and open_slot < 0:
-			combat.release_attack()
-		else:
-			combat.cancel_charge()
-		get_viewport().set_input_as_handled()
-		return
-	if ended or not (event is InputEventKey and event.pressed and not event.echo):
-		return
-	if event.keycode == KEY_ESCAPE:
-		toggle_pause()
-		get_viewport().set_input_as_handled()
-	elif event.keycode == KEY_TAB and not paused:
-		show_routes = not show_routes
-		get_viewport().set_input_as_handled()
+	input_sys.handle_input(event)
+
 
 func _unhandled_input(event: InputEvent) -> void:
-	if ended:
-		return
-	if event is InputEventKey and event.pressed and not event.echo:
-		if paused:
-			return
-		match event.keycode:
-			KEY_E:
-				interact()
-			KEY_Q:
-				borrow_fire()
-			KEY_R:
-				use_bridge()
-			KEY_F:
-				lantern_on = not lantern_on and oil > 0.0
-			KEY_ENTER:
-				start_night()
-			KEY_SHIFT:
-				combat.dash()
-			KEY_SPACE, KEY_J:
-				combat.slash()
-			KEY_1, KEY_2, KEY_3, KEY_4:
-				build_selected(event.keycode - KEY_1)
-			KEY_U:
-				upgrade_selected()
-	elif not paused and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed and open_slot < 0:
-		attack_held = true
-		combat.start_charge()
+	input_sys.handle_unhandled_input(event)
+
 
 func cancel_pointer_attack() -> void:
-	if attack_held:
-		attack_held = false
-		combat.cancel_charge()
+	input_sys.cancel_pointer_attack()
+
 
 func toggle_pause() -> void:
 	if ended or perk_open:
@@ -629,7 +611,7 @@ func toggle_pause() -> void:
 		close_build()
 		return
 	paused = not paused
-	hud.update_inspection(self)
+	sync_inspection()
 	if paused:
 		cancel_pointer_attack()
 		hud.show_pause()
@@ -638,8 +620,10 @@ func toggle_pause() -> void:
 		if night and combat.xp >= rank_target:
 			open_night_perks.call_deferred()
 
+
 func leave_battle() -> void:
 	return_requested.emit()
+
 
 func finish_battle(success: bool) -> void:
 	if ended:
@@ -654,24 +638,12 @@ func finish_battle(success: bool) -> void:
 	refresh_view()
 	hud.show_result(won)
 
+
 func acknowledge_battle() -> void:
 	if ended and not ready_to_exit:
 		ready_to_exit = true
 		completed.emit(won)
 
-func make_audio() -> void:
-	ambience = AudioStreamPlayer.new()
-	var wind: AudioStreamWAV = load("res://audio/wind.wav").duplicate()
-	wind.loop_mode = AudioStreamWAV.LOOP_FORWARD
-	wind.loop_end = wind.data.size() / 2
-	ambience.stream = wind
-	ambience.volume_db = -23.0
-	add_child(ambience)
-	ambience.play()
-	cue = AudioStreamPlayer.new()
-	cue.volume_db = -16.0
-	add_child(cue)
 
-func play_cue(name: String) -> void:
-	cue.stream = load("res://audio/%s.wav" % name)
-	cue.play()
+func play_cue(cue_name: String) -> void:
+	audio_sys.play_cue(cue_name)

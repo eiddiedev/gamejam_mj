@@ -20,6 +20,7 @@ const FIRE_FLASH_TIME := 0.72
 const INK := Color("#17201f")
 const FONT = preload("res://typeface.tres")
 const HEADING = preload("res://heading.tres")
+const ViewState = preload("res://scripts/data/BattleViewState.gd")
 const TOWERS := ["烽火盆", "骨弩台", "誓言路障", "火油槽"]
 const DESCRIPTIONS := ["驱散黑暗并显露影潜者", "远程攻击，优先消灭飞蛾", "挡住地面敌人，保护后方工事", "拖慢敌人，可用提灯引燃"]
 const WINDOW_SIZE := Vector2(1280, 800)
@@ -163,54 +164,51 @@ func set_place(place: String, landscape: String) -> void:
 	root.get_node("Location/Place").text = place
 	root.get_node("Location/Land").text = landscape
 
+func is_menu_open() -> bool:
+	return is_instance_valid(menu)
+
 func update_status(level) -> void:
-	var seconds := ceili(level.phases.left)
-	nightfall = level.night
-	phase.text = "第%d夜 · %s" % [level.phases.night_number, "深夜" if nightfall else "黄昏"]
+	apply_state(level.build_view_state())
+
+func apply_state(state: ViewState) -> void:
+	var seconds := ceili(state.phase_left)
+	nightfall = state.night
+	phase.text = "第%d夜 · %s" % [state.night_number, "深夜" if nightfall else "黄昏"]
 	timer.text = "清理余敌" if nightfall and seconds == 0 else "%02d:%02d" % [seconds / 60, seconds % 60]
-	fire_fraction = clampf(level.fire_hp / 100.0, 0.0, 1.0)
-	fire_label.text = str(ceili(level.fire_hp))
+	fire_fraction = clampf(state.fire_hp / 100.0, 0.0, 1.0)
+	fire_label.text = str(ceili(state.fire_hp))
 	update_fire_warning()
-	resource.text = str(level.run.embers)
-	bone_label.text = str(level.run.bone)
-	oil_label.text = "%d%%" % ceili(level.oil)
-	remaining.text = "待来袭  %d" % level.spawner.remaining() if level.spawner.remaining() > 0 \
-		else "场内  %d" % level.combat.count_enemies()
-	remaining.visible = nightfall and not level.ended
-	var maximum := maxf(1.0, read_number(level.combat, &"player_hp_max", 100.0))
-	var hp := clampf(read_number(level.combat, &"player_hp", maximum), 0.0, maximum)
+	resource.text = str(state.embers)
+	bone_label.text = str(state.bone)
+	oil_label.text = "%d%%" % ceili(state.oil)
+	remaining.text = "待来袭  %d" % state.spawner_remaining if state.spawner_remaining > 0 \
+		else "场内  %d" % state.live_enemies
+	remaining.visible = nightfall and not state.ended
+	var maximum := maxf(1.0, state.player_hp_max)
+	var hp := clampf(state.player_hp, 0.0, maximum)
 	var new_fraction := clampf(hp / maximum, 0.0, 1.0)
 	if new_fraction < health_fraction - 0.005:
 		health_flash = 0.22
 	health_fraction = new_fraction
 	health_label.text = "%d / %d" % [ceili(hp), ceili(maximum)]
 	health_label.modulate = Color("#ff9874") if health_fraction < 0.35 else Color.WHITE
-	var earned := read_number(level.combat, &"xp", 0.0)
-	var last := read_number(level, &"rank_previous", 0.0)
-	var threshold := read_number(level, &"rank_target", 14.0)
-	var need := maxf(1.0, threshold - last)
-	var toward := clampf(earned - last, 0.0, need)
+	var need := maxf(1.0, float(state.rank_target - state.rank_previous))
+	var toward := clampf(float(state.xp - state.rank_previous), 0.0, need)
 	xp_fraction = toward / need
-	rank_label.text = "夜阶 %d  ·  %d/%d" % [int(read_number(level, &"night_rank", 1.0)), int(toward), int(need)]
-	var kills := int(read_number(level.combat, &"kills", 0.0))
-	if kills > shown_kills:
+	rank_label.text = "夜阶 %d  ·  %d/%d" % [state.night_rank, int(toward), int(need)]
+	if state.kills > shown_kills:
 		xp_flash = 0.27
-	shown_kills = kills
-	slain_label.text = "击杀 %d" % kills
-	oil_fraction = clampf(level.oil / 100.0, 0.0, 1.0)
-	time_fraction = level.phases.progress()
-	advance.visible = not nightfall and not level.ended
+	shown_kills = state.kills
+	slain_label.text = "击杀 %d" % state.kills
+	oil_fraction = clampf(state.oil / 100.0, 0.0, 1.0)
+	time_fraction = state.phase_progress
+	advance.visible = not nightfall and not state.ended
 	advance_hint.visible = advance.visible
-	environment.text = level.weather_status()
-	var guidance: String = level.action_hint()
-	hint.text = guidance
-	action.visible = not guidance.is_empty() and not is_instance_valid(menu) and not level.ended
-	update_inspection(level)
+	environment.text = state.weather_text
+	hint.text = state.action_hint
+	action.visible = not state.action_hint.is_empty() and not is_instance_valid(menu) and not state.ended
+	apply_inspection(state)
 	instruments.queue_redraw()
-
-func read_number(source: Object, field: StringName, fallback: float) -> float:
-	var value: Variant = source.get(field)
-	return float(value) if value != null else fallback
 
 func toggle_fullscreen() -> void:
 	if fullscreen.has_focus():
@@ -220,52 +218,25 @@ func toggle_fullscreen() -> void:
 		Window.MODE_EXCLUSIVE_FULLSCREEN] else Window.MODE_FULLSCREEN
 
 func update_inspection(level) -> void:
+	apply_inspection(level.build_view_state())
+
+func apply_inspection(state: ViewState) -> void:
 	inspection_panel.hide()
-	if level.paused or level.ended:
+	if not state.inspect_visible:
 		inspection.hide()
-		level.scenery.hide_support_range()
 		return
-	var selecting := is_instance_valid(menu)
-	var selected: int = level.open_slot if selecting else hovered_support(level)
-	if selected < 0:
-		inspection.hide()
-		level.scenery.hide_support_range()
-		return
-	var tower = level.combat.towers[selected]
-	inspect_at = level.slot_points[selected]
-	inspect_marker = level.get_global_transform_with_canvas() * level.support_muzzle(selected)
-	inspect_radius = level.combat.inspect_radius(selected)
-	var current := inspect_radius
-	var planned := 0.0
-	var title: String = level.support_name[selected]
-	if tower.level == 0 or (tower.kind == "brazier" and not tower.lit) or (tower.kind == "oil" and tower.spent and tower.burn <= 0.0):
-		planned = current
-		current = 0.0
-	elif selecting and tower.level < 3:
-		planned = level.combat.inspect_radius(selected, true)
-	level.scenery.show_support_range(inspect_at, current, planned)
+	inspect_at = state.inspect_at
+	inspect_marker = state.inspect_marker
+	inspect_radius = state.inspect_radius
 	inspection.show()
 	inspection.queue_redraw()
-	if not selecting:
-		if tower.level == 0:
-			inspection_caption.text = "%s · 未修缮" % title
+	if not state.inspect_selecting:
+		if state.inspect_level == 0:
+			inspection_caption.text = "%s · 未修缮" % state.inspect_title
 		else:
-			inspection_caption.text = "%s · Lv.%d" % [title, tower.level]
+			inspection_caption.text = "%s · Lv.%d" % [state.inspect_title, state.inspect_level]
 		inspection_panel.position = (inspect_marker + Vector2(-90, -54)).clamp(Vector2(12, 107), Vector2(1088, 675))
 		inspection_panel.show()
-
-func hovered_support(level) -> int:
-	var cursor: Vector2 = level.get_global_mouse_position()
-	var points: Array[Vector2] = level.slot_points
-	var selected := -1
-	var nearest := 25.0 ** 2
-	for index in points.size():
-		var distance := cursor.distance_squared_to(points[index])
-		distance = minf(distance, cursor.distance_squared_to(level.support_muzzle(index)))
-		if distance < nearest:
-			nearest = distance
-			selected = index
-	return selected
 
 func draw_inspection() -> void:
 	var at := inspect_marker

@@ -1,5 +1,6 @@
 extends Node
 
+const OathDef = preload("res://scripts/data/OathData.gd")
 const COMMON := "common"
 const RARE := "rare"
 const EPIC := "epic"
@@ -39,8 +40,22 @@ const OATHS := {
 		"effect": "篝火低于 30 时，守夜人与防御塔攻速翻倍，守夜人移速翻倍，每次击杀回火 1 点。"},
 }
 
+var oath_defs: Dictionary[String, OathDef] = {}
+
+
+func _init() -> void:
+	for id: String in OATHS:
+		var entry: Dictionary = OATHS[id]
+		oath_defs[id] = OathDef.create(id, entry["base"], entry["letter"], entry["rarity"], entry["title"], entry["effect"])
+
+
+func get_oath_data(id: String) -> OathDef:
+	return oath_defs[id] if oath_defs.has(id) else null
+
+
 func get_oath(id: String) -> Dictionary:
-	return OATHS.get(id, {})
+	var data := get_oath_data(id)
+	return data.to_dict() if data != null else {}
 
 func has_oath(owned: Array, id: String) -> bool:
 	return id in owned
