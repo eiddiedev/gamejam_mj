@@ -22,6 +22,7 @@ const PlayerSys = preload("res://scripts/entities/PlayerCombat.gd")
 const Enemies = preload("res://scripts/entities/EnemySystem.gd")
 const WATCHER_SCENE = preload("res://scenes/entities/Player.tscn")
 const FIRE_SCENE = preload("res://scenes/entities/Campfire.tscn")
+const HERALD_INTERVAL := Enemies.HERALD_INTERVAL
 const HERALD_WARNING := Enemies.HERALD_WARNING
 
 var battle: Node2D
