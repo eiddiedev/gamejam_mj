@@ -1,0 +1,7 @@
+[gd_resource type="SystemFont" load_steps=2 format=3]
+
+[ext_resource type="FontFile" path="res://art/NotoSansCJKsc-Regular.otf" id="1"]
+
+[resource]
+fallbacks = Array[Font]([ExtResource("1")])
+font_names = PackedStringArray("Menlo", "Consolas", "DejaVu Sans Mono")
