@@ -1,6 +1,6 @@
 extends RefCounted
 
-const Valley = preload("res://scripts/model/FallenKing.gd")
+const Relic = preload("res://scripts/model/ObsidianRelic.gd")
 const STONE := Color("#535866")
 const DARK := Color("#454655")
 const SNOW := Color("#aab8c4")
@@ -24,8 +24,7 @@ static func build(world) -> void:
 			world.weathered(STONE,0.09),7,6)
 		world.stone(x,y+5,25,26,0.08,world.weathered(SNOW,0.08),0.2,height*1.06)
 	wall_walk(world)
-	Valley.skull(world,Vector2(152,221),1.35)
-	world.ellipsoid(world.at(169,239,0.07),Vector3(2.04,0.22,1.52),FROST,13,6)
+	Relic.build(world)
 	for index in range(37):
 		var at := Vector2(world.random.randf_range(33,696),world.random.randf_range(83,463))
 		if world.route_distance(at) < 15.0 or world.slot_distance(at) < 18.0:

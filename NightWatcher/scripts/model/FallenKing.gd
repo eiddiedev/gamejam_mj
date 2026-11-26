@@ -1,10 +1,7 @@
 extends RefCounted
 
-const BONE := Color("#c0b99b")
-const MARROW := Color("#7f8170")
 const SOIL := Color("#476457")
 const STONE := Color("#65736b")
-const DARK := Color("#2a3837")
 const RUST := Color("#a45736")
 const BARK := Color("#46514e")
 const Relief = preload("res://scripts/model/ReliefDetail.gd")
@@ -13,6 +10,7 @@ const Arms = preload("res://scripts/model/ValleyArms.gd")
 const Cranium = preload("res://assets/props/fallen_king/valley_cranium.glb")
 
 static func build(world) -> void:
+	underpaint(world)
 	ridge(world)
 	ruins(world)
 	skeleton(world)
@@ -28,6 +26,44 @@ static func build(world) -> void:
 		var center: Vector2 = patch[0].lerp(patch[3], 0.5)
 		world.ring_patch(center, Vector2(23,9), 0.024, Color("#63887a"), 11)
 		world.ring_patch(center + Vector2(11,2), Vector2(11,4), 0.026, Color("#8ca696"), 9)
+
+static func underpaint(world) -> void:
+	var banks := [
+		[Vector2(109, 165), Vector2(97, 63), -0.39, Color("#536e68")],
+		[Vector2(76, 348), Vector2(61, 47), 0.44, Color("#415c55")],
+		[Vector2(203, 409), Vector2(88, 37), 0.29, Color("#5e7763")],
+		[Vector2(314, 220), Vector2(66, 34), -0.73, Color("#55725d")],
+		[Vector2(373, 411), Vector2(57, 37), -0.17, Color("#476a5e")],
+		[Vector2(550, 306), Vector2(136, 86), -0.73, Color("#435d53")],
+		[Vector2(586, 155), Vector2(70, 48), 0.68, Color("#3e5953")],
+		[Vector2(692, 258), Vector2(71, 69), -0.42, Color("#587565")],
+		[Vector2(629, 430), Vector2(99, 37), 0.31, Color("#4e695d")],
+	]
+	for id in range(banks.size()):
+		var bank: Array = banks[id]
+		var center: Vector2 = bank[0]
+		var extent: Vector2 = bank[1]
+		var angle: float = bank[2]
+		var ink: Color = bank[3]
+		var edge: Array[Vector2] = []
+		var inner: Array[Vector2] = []
+		for index in range(32):
+			var t := TAU * index / 32.0
+			var shape := 1.0 + sin(t * 3.0 + id * 0.56) * 0.16 + cos(t * 7.0 - id) * 0.09
+			shape += sin(t * 13.0 + id * 0.39) * 0.043
+			var offset := (extent * Vector2.from_angle(t) * shape).rotated(angle)
+			edge.append(center + offset)
+			inner.append(center + Vector2(-8.0, 5.0) + offset * (0.69 + 0.06 * cos(t * 5.0)))
+		var soft_edge: Color = world.palette[0].lerp(ink, 0.65)
+		world.patch(edge, 0.001 + id * 0.0009, Color(soft_edge, 0.24))
+		world.patch(inner, 0.002 + id * 0.0009, Color(ink, 0.25))
+		for piece in range(2):
+			var start := (id * 17 + piece * 12) % edge.size()
+			var marks := PackedVector3Array()
+			for index in range(4 + (id + piece) % 3):
+				var p := edge[(start + index) % edge.size()].lerp(center, 0.04)
+				marks.append(world.from_floor(p, 0.004 + id * 0.0009))
+			world.pencil(marks, 0.018, Color(ink.darkened(0.25), 0.74))
 
 static func ridge(world) -> void:
 	for index in range(12):
@@ -81,58 +117,6 @@ static func skeleton(world) -> void:
 	world.sculpture("陨王 · 冠饰", func(): crown(world, skull_anchor, 1.0))
 	world.sculpture("陨王 · 椎骨与胸廓", func(): Ribs.build(world))
 	world.sculpture("陨王 · 臂骨与指节", func(): Arms.build(world))
-
-static func skull(world, at: Vector2, scale_factor: float) -> void:
-	var anchor: Vector3 = world.from_floor(at)
-	var cream := BONE.lightened(0.045)
-	bone_shell(world, anchor, scale_factor, cream)
-	world.ellipsoid(anchor + Vector3(0.0,0.31,0.52)*scale_factor,Vector3(0.68,0.39,0.66)*scale_factor,BONE,14,7)
-	for side in [-1.0,1.0]:
-		var socket: Vector3 = anchor + Vector3(side*0.43,1.02,0.68)*scale_factor
-		world.ellipsoid(socket,Vector3(0.32,0.35,0.12)*scale_factor,DARK.darkened(0.21),13,7)
-		var brow := PackedVector3Array([
-			socket+Vector3(-0.27,0.18,0.09)*scale_factor, socket+Vector3(-0.128,0.28,0.10)*scale_factor,
-			socket+Vector3(0.12,0.34,0.10)*scale_factor, socket+Vector3(0.29,0.24,0.06)*scale_factor
-		])
-		world.mesh.smooth_tube(brow,PackedFloat32Array([0.059,0.083,0.095,0.050]),cream,9,0.09,false)
-		world.ellipsoid(anchor + Vector3(side * 0.58,0.59,0.78)*scale_factor,
-			Vector3(0.20,0.19,0.27)*scale_factor,MARROW.lightened(0.17),9,6)
-	var nose := anchor + Vector3(0,0.69,0.96)*scale_factor
-	world.mesh.triangle(nose+Vector3(0,0.22,0.028)*scale_factor, nose+Vector3(-0.14,-0.15,0.01)*scale_factor,
-		nose+Vector3(0.13,-0.13,0.015)*scale_factor,DARK)
-	world.ellipsoid(anchor + Vector3(0,0.26,1.0)*scale_factor,Vector3(0.61,0.14,0.10)*scale_factor,DARK,10,6)
-	for index in range(9):
-		var x := (index-4)*0.115
-		world.mesh.block(anchor + Vector3(x,0.28,1.085 - absf(x)*0.12)*scale_factor,
-			0.084*scale_factor, 0.15*scale_factor, 0.076*scale_factor,0.0,cream,0.019,0.022,false)
-	var forehead := [Vector2(0.35,1.89),Vector2(0.29,1.79),Vector2(0.18,1.71),Vector2(0.22,1.64),Vector2(0.15,1.55)]
-	var seam := PackedVector3Array()
-	for point in forehead:
-		var z := 0.92 * sqrt(maxf(0.01,1.0 - pow(point.x/1.05,2.0) - pow((point.y-0.98)/1.15,2.0)))
-		seam.append(anchor + Vector3(point.x,point.y,z+0.027)*scale_factor)
-	world.pencil(seam,0.020*scale_factor,Color("#575e52"))
-static func bone_shell(world, anchor: Vector3, multiplier: float, tone: Color) -> void:
-	var previous := PackedVector3Array()
-	for latitude in range(20):
-		var local_ring := PackedVector3Array()
-		var phi := lerpf(-1.5705, 1.5705, latitude / 19.0)
-		for edge in range(36):
-			var turn := edge * TAU / 36.0
-			var chips := 0.98 + 0.029 * sin(edge * 9.92 + latitude * 7.67)
-			local_ring.append(Vector3(cos(turn)*cos(phi)*1.05*chips,
-				0.98+sin(phi)*1.15*chips,sin(turn)*cos(phi)*0.92*chips))
-		if latitude > 0:
-			for edge in range(36):
-				var next := (edge+1)%36
-				var center := (previous[edge]+local_ring[edge]+local_ring[next]+previous[next])*0.25
-				var orbit := Vector2((absf(center.x)-0.43)/0.29,(center.y-1.02)/0.33)
-				if center.z > 0.45 and orbit.length_squared() < 1.0:
-					continue
-				var grain := 0.018 * sin(edge * 7.6 + latitude * 4.2)
-				var color := tone.darkened(absf(grain))
-				world.mesh.quad(anchor+previous[edge]*multiplier,anchor+local_ring[edge]*multiplier,
-					anchor+local_ring[next]*multiplier,anchor+previous[next]*multiplier,color)
-		previous = local_ring
 
 static func crown(world, anchor: Vector3, s: float) -> void:
 	var copper := Color("#817052")
@@ -282,9 +266,10 @@ static func old_tree(world) -> void:
 	var origin: Vector3 = world.at(95,260)
 	var low := origin + Vector3(-0.33,1.55,-0.46)
 	var high := origin + Vector3(-0.91,3.00,-0.39)
-	var end := origin + Vector3(-1.13,6.35,0.1)
-	world.mesh.smooth_tube(PackedVector3Array([origin,low,high,end]),
-		PackedFloat32Array([0.77,0.53,0.45,0.17]),BARK,13,0.10,true)
+	world.mesh.smooth_tube(PackedVector3Array([origin, low, high,
+		origin + Vector3(-1.20, 4.09, -0.50), origin + Vector3(-1.08, 4.82, -0.61),
+		origin + Vector3(-1.22, 5.75, -0.41), origin + Vector3(-1.78, 6.54, -0.52)]),
+		PackedFloat32Array([0.77, 0.53, 0.45, 0.38, 0.312, 0.205, 0.047]), BARK, 13, 0.09, true)
 	for index in range(7):
 		var angle := index * 2.399
 		var dir := Vector3(cos(angle),0,sin(angle))
@@ -306,14 +291,41 @@ static func old_tree(world) -> void:
 				origin+dir*1.07+Vector3.UP*0.302+across*0.69,
 				origin+dir*1.37+Vector3.UP*0.190+across*0.54]),
 				0.016, BARK.darkened(0.36))
-	for index in range(5):
-		var start: Vector3 = low.lerp(high,index/4.0)
-		var side := 1.0 if index%2==0 else -1.0
-		var finish := start + Vector3(side*(1.81+index*0.29),1.19+index*0.49,-0.94+index*0.31)
-		var joint := start.lerp(finish,0.57)+Vector3(0,0.21,0.14)
-		world.mesh.smooth_tube(PackedVector3Array([start,joint,finish]),PackedFloat32Array([0.26,0.138,0.025]),BARK,8,0.065,true)
-		world.mesh.tube(PackedVector3Array([joint,joint.lerp(finish,0.38)+Vector3.UP*0.35,finish+Vector3(0.18,1.03,-0.23)]),
-			PackedFloat32Array([0.095,0.063,0.015]),BARK,7,0.12,true)
+
+	# The broken crown forks at different heights. Each taper changes direction
+	# where a branch bore weight or snapped, leaving negative space above the arch.
+	var limbs := [
+		[[Vector3(-0.39, 1.77, -0.47), Vector3(0.28, 2.47, -0.62),
+			Vector3(1.15, 2.95, -0.83), Vector3(1.84, 3.02, -1.09),
+			Vector3(2.48, 3.51, -1.34), Vector3(2.80, 4.16, -1.39),
+			Vector3(3.30, 4.47, -1.52)], [0.36, 0.28, 0.22, 0.14, 0.097, 0.052, 0.009]],
+		[[Vector3(1.69, 3.00, -1.04), Vector3(2.08, 3.18, -0.27),
+			Vector3(2.63, 3.03, 0.10), Vector3(2.98, 3.12, 0.44),
+			Vector3(3.26, 3.42, 0.50)], [0.12, 0.098, 0.067, 0.036, 0.006]],
+		[[Vector3(2.73, 4.00, -1.41), Vector3(2.50, 4.70, -1.30),
+			Vector3(2.61, 5.28, -1.35), Vector3(2.88, 5.61, -1.51)],
+			[0.093, 0.065, 0.036, 0.007]],
+		[[Vector3(-0.78, 2.82, -0.43), Vector3(-1.58, 2.85, -0.76),
+			Vector3(-2.31, 3.38, -1.02), Vector3(-2.59, 4.18, -1.06),
+			Vector3(-3.28, 4.46, -1.43), Vector3(-3.75, 4.92, -1.67)],
+			[0.31, 0.24, 0.17, 0.11, 0.057, 0.010]],
+		[[Vector3(-2.45, 3.78, -1.04), Vector3(-2.95, 3.94, -0.78),
+			Vector3(-3.44, 3.67, -0.34), Vector3(-3.79, 3.74, 0.16)], [0.11, 0.083, 0.049, 0.009]],
+		[[Vector3(-1.10, 4.73, -0.61), Vector3(-0.48, 5.07, -0.95),
+			Vector3(-0.11, 5.62, -1.00), Vector3(0.46, 5.91, -0.97),
+			Vector3(0.72, 6.39, -1.09), Vector3(1.20, 6.74, -1.24)],
+			[0.23, 0.19, 0.13, 0.093, 0.044, 0.009]],
+		[[Vector3(0.28, 5.84, -0.98), Vector3(0.70, 5.82, -1.50),
+			Vector3(0.99, 5.94, -1.87), Vector3(1.48, 6.16, -2.00)], [0.10, 0.074, 0.046, 0.006]],
+		[[Vector3(-1.39, 6.02, -0.44), Vector3(-1.61, 6.59, -0.01),
+			Vector3(-1.92, 6.90, 0.24), Vector3(-2.42, 7.13, 0.38)], [0.105, 0.075, 0.035, 0.006]],
+	]
+	for limb in limbs:
+		var branches := PackedVector3Array()
+		for offset: Vector3 in limb[0]:
+			branches.append(origin + offset)
+		var girth := PackedFloat32Array(limb[1])
+		world.mesh.smooth_tube(branches, girth, BARK, 9 if girth[0] > 0.14 else 7, 0.07, girth[0] > 0.20)
 
 static func fire_rim(world, first: int, samples: PackedVector3Array, width: float, strength: float) -> void:
 	var vertices: PackedVector3Array = world.mesh.vertices

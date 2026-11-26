@@ -1,10 +1,10 @@
 extends RefCounted
 
 const Detail = preload("res://scripts/model/ReliefDetail.gd")
-const OCHRE := Color("#b68a59")
-const CLAY := Color("#906249")
-const UMBER := Color("#614c43")
-const MASONRY := Color("#a88b6d")
+const OCHRE := Color("#be8c62")
+const CLAY := Color("#a27160")
+const UMBER := Color("#695663")
+const MASONRY := Color("#b0987a")
 const BONE := Color("#c8b48d")
 
 static func build(world) -> void:
@@ -27,19 +27,39 @@ static func build_contact_shadows(world) -> void:
 		Detail.contact(world, Vector2(x - 8, y + 92.0), Vector2(11, 14), Color("#866d53"), -0.3)
 
 static func build_sand_beds(world) -> void:
-	# Large soft-color strata wind between the cliffs behind the playable routes.
-	world.patch(loop([[4,101],[37,84],[83,88],[114,120],[124,171],[143,209],[127,219],[104,196],[82,162],[49,147],[1,146]]),
-		0.006, Color("#9e7b5b"))
-	world.patch(loop([[263,68],[308,98],[346,136],[351,175],[328,214],[298,227],[286,233],[269,219],[291,170],[289,131],[252,96]]),
-		0.006, Color("#987355"))
-	world.patch(loop([[478,228],[517,198],[558,181],[594,170],[634,161],[685,160],[726,179],[760,209],
-		[768,318],[726,331],[668,327],[629,307],[581,290],[542,270],[507,269]]), 0.007, Color("#9f7e5d"))
-	world.patch(loop([[578,219],[617,198],[666,188],[715,202],[744,230],[751,274],[731,299],[688,307],[646,293],[585,268]]),
-		0.010, Color("#a68a66"))
-	world.patch(loop([[92,453],[124,418],[166,392],[190,378],[222,399],[262,419],[284,448],[341,479],[227,507],[136,498]]),
-		0.006, Color("#816353"))
-	world.patch(loop([[458,419],[529,411],[581,391],[616,400],[648,422],[663,466],[639,489],[538,497],[489,479]]),
-		0.006, Color("#9b7a5d"))
+	var drifts := [
+		[[[2,104],[36,89],[75,100],[113,124],[141,192],[125,222],[96,194],[54,151],[0,149]], "#a17b65"],
+		[[[259,66],[308,97],[340,126],[349,174],[330,217],[303,230],[266,229],[279,181],[285,133],[250,94]], "#9d745c"],
+		[[[477,230],[514,199],[559,181],[600,161],[656,155],[722,173],[764,197],[785,304],[734,331],
+			[680,330],[628,307],[583,294],[537,267],[505,270]], "#ad8364"],
+		[[[577,221],[614,197],[666,184],[711,199],[743,222],[754,269],[731,291],[688,309],[650,293],[588,264]], "#bc9470"],
+		[[[86,466],[118,420],[163,394],[190,374],[224,404],[260,426],[282,450],[344,490],[231,509],[132,496]], "#8b665c"],
+		[[[449,420],[491,421],[531,413],[576,388],[615,398],[648,422],[666,466],[639,488],[539,503],[491,479]], "#b28366"],
+		[[[286,256],[313,259],[344,249],[379,247],[413,263],[434,288],[414,328],[380,339],[343,325],[303,313],[279,287]], "#bb8a67"],
+	]
+	for index in range(drifts.size()):
+		var beach := loop(drifts[index][0])
+		for pass_number in range(2):
+			var rounded: Array[Vector2] = []
+			for side in range(beach.size()):
+				var a := beach[side]
+				var b := beach[(side + 1) % beach.size()]
+				rounded.append(a.lerp(b, 0.23))
+				rounded.append(a.lerp(b, 0.77))
+			beach = rounded
+		var height := 0.004 + index * 0.0011
+		var color := Color(drifts[index][1])
+		world.patch(beach, height, Color(color, 0.28))
+		for fleck in range(3):
+			var start := (7 + fleck * (beach.size() / 3) + index * 4) % beach.size()
+			var ink := PackedVector3Array()
+			for step in range(5):
+				var pick := beach[(start + step) % beach.size()]
+				if world.route_distance(pick) < 13.0 or world.slot_distance(pick) < 15.0:
+					break
+				ink.append(world.from_floor(pick, height + 0.002))
+			if ink.size() >= 3:
+				world.pencil(ink, 0.018, Color(color.darkened(0.31), 0.81))
 
 static func loop(raw: Array) -> Array[Vector2]:
 	var result: Array[Vector2] = []
@@ -71,54 +91,144 @@ static func mesa(world, footprint: Array[Vector2], elevations: PackedFloat32Arra
 	for p in footprint:
 		center += p
 	center /= footprint.size()
-	var lower := footprint
-	for band in range(1, elevations.size()):
-		var ridge: Array[Vector2] = []
-		var shrink := float(band) / elevations.size() * 0.34 + (0.030 if band % 2 == 0 else -0.003)
-		for i in range(lower.size()):
-			var shift := sin(i * 2.51 + band * 1.37) * 0.026
-			ridge.append(footprint[i].lerp(center, shrink + shift))
-		var tint := base.lerp(cap, float(band) / elevations.size() * 0.57)
-		if band % 2 == 0:
-			tint = tint.darkened(0.16)
-		for i in range(ridge.size()):
-			var j := (i + 1) % ridge.size()
-			var lo := elevations[band - 1]
-			var hi := elevations[band]
-			var face := PackedVector3Array([
-				world.at(lower[i].x, lower[i].y, lo), world.at(ridge[i].x, ridge[i].y, hi),
-				world.at(ridge[j].x, ridge[j].y, hi), world.at(lower[j].x, lower[j].y, lo),
-			])
-			world.mesh.quad(face[0], face[1], face[2], face[3], tint)
-			if band % 2 == 1 or i % 3 == 0:
-				ink_seam(world, face, tint.darkened(0.44), i % 2 == 0)
-		lower = ridge
-	world.patch(lower, elevations[-1], cap)
+	var perimeter: Array[Vector2] = []
+	for edge in range(footprint.size()):
+		var a := footprint[edge]
+		var b := footprint[(edge + 1) % footprint.size()]
+		var divisions := clampi(ceili(a.distance_to(b) / 14.0), 2, 7)
+		for index in range(divisions):
+			perimeter.append(a.lerp(b, float(index) / divisions))
+	var lower := rock_ring(world, perimeter, center, 0.0, 0.0, 0.0)
+	var ridge := lower
+	var stages := PackedVector2Array([Vector2(0.20, 0.018), Vector2(0.66, 0.045),
+		Vector2(0.83, -0.010), Vector2(1.0, 0.0)])
+	for band in range(elevations.size() - 1):
+		for layer in range(stages.size()):
+			var stage := stages[layer]
+			var height := lerpf(elevations[band], elevations[band + 1], stage.x)
+			var fraction := (band + stage.x) / elevations.size()
+			ridge = rock_ring(world, perimeter, center, height, 0.34 * fraction + stage.y, fraction)
+			var tone := base.lerp(cap, fraction * 0.48)
+			if layer == 1:
+				tone = tone.lerp(UMBER, 0.18)
+			elif layer == 2:
+				tone = tone.lerp(cap, 0.34)
+			rock_band(world, lower, ridge, tone, band, layer)
+			lower = ridge
+	var top := PackedVector2Array()
+	for p in ridge:
+		top.append(Vector2(p.x, p.z))
+	var triangles := Geometry2D.triangulate_polygon(top)
+	for index in range(0, triangles.size(), 3):
+		var a := ridge[triangles[index]]
+		var b := ridge[triangles[index + 1]]
+		var c := ridge[triangles[index + 2]]
+		var color := cap.lerp(base, 0.13 + sin((a.x + b.z) * 2.7) * 0.035)
+		world.mesh.triangle(a, c, b, color, Vector3.UP)
 
-static func ink_seam(world, face: PackedVector3Array, tint: Color, cracks: bool) -> void:
-	var normal := (face[1] - face[0]).cross(face[3] - face[0]).normalized()
-	world.mesh.panel_stroke(face, PackedVector2Array([Vector2(0.43, 0.07), Vector2(0.39, 0.33),
-		Vector2(0.51, 0.53), Vector2(0.46, 0.76), Vector2(0.51, 0.93)]), 0.032, tint, normal)
-	if cracks:
-		world.mesh.panel_stroke(face, PackedVector2Array([Vector2(0.98, 0.66), Vector2(0.78, 0.65),
-			Vector2(0.60, 0.71), Vector2(0.49, 0.72)]), 0.026, tint, normal)
+static func rock_ring(world, perimeter: Array[Vector2], center: Vector2, height: float,
+		shrink: float, fraction: float) -> PackedVector3Array:
+	var result := PackedVector3Array()
+	var seed := center.x * 0.18 + center.y * 0.37
+	for i in range(perimeter.size()):
+		var theta := TAU * i / perimeter.size()
+		var ruffle := sin(theta * 6.0 + seed) * 0.021 + cos(theta * 11.0 - seed) * 0.013
+		var sag := sin(theta * 3.0 + seed + fraction * 3.2) * 0.087 + sin(theta * 7.0 + seed) * 0.032
+		var step := clampf(height * 4.0, 0.0, 1.0)
+		var p := perimeter[i].lerp(center, shrink + ruffle * step)
+		result.append(world.from_floor(p, height + sag * step))
+	return result
+
+static func rock_band(world, lower: PackedVector3Array, ridge: PackedVector3Array, tone: Color,
+		band: int, layer: int) -> void:
+	for i in range(ridge.size()):
+		var j := (i + 1) % ridge.size()
+		var a := lower[i]
+		var b := ridge[i]
+		var c := ridge[j]
+		var d := lower[j]
+		var pigment := tone.lerp(UMBER, 0.065 + 0.045 * cos((a.x + a.z) * 1.17))
+		world.mesh.quad(a, b, c, d, Color(pigment, 0.84))
+		# Draw the strata along the real bevel, with gaps where the rock sheared.
+		var normal := (b - a).cross(d - a).normalized()
+		var ink := Color(tone.lerp(UMBER, 0.48).darkened(0.43), 0.81)
+		if layer == 2 and (i + band * 3) % 11 != 9:
+			var face := PackedVector3Array([
+				a, b, c, d
+			])
+			world.contour.panel_stroke(face, PackedVector2Array([Vector2(0.65, 0.0),
+				Vector2(0.61 + sin(i * 2.2) * 0.12, 0.43), Vector2(0.65, 1.0)]),
+				0.026, ink, normal, false, false)
+		elif layer == 1 and (i + band * 4) % 7 in [1, 4]:
+			var face := PackedVector3Array([a, b, c, d])
+			world.contour.panel_stroke(face, PackedVector2Array([Vector2(0.06, 0.36), Vector2(0.28, 0.44),
+				Vector2(0.56, 0.37), Vector2(0.74, 0.50), Vector2(0.93, 0.47)]), 0.022, ink, normal)
 
 static func build_ruins(world) -> void:
-	# Main terrace, two extant gates and the broken approach down into camp.
-	world.arch(Vector2(155, 77), 38.0, 2.55, MASONRY.darkened(0.12), -0.07)
-	world.arch(Vector2(232, 94), 44.0, 2.95, MASONRY, 0.17)
-	world.wall([Vector2(104, 71), Vector2(124, 75), Vector2(137, 78)], 2.05, MASONRY, 17.0)
-	world.wall([Vector2(251, 98), Vector2(274, 110), Vector2(283, 136)], 1.16, MASONRY, 14.0)
-	world.steps(Vector2(229, 130), Vector2(233, 102), 30.0, 0.75, 7, MASONRY)
-	world.steps(Vector2(268, 237), Vector2(242, 231), 32.0, 1.27, 10, MASONRY)
-	world.steps(Vector2(153, 205), Vector2(175, 183), 27.0, 1.11, 8, MASONRY.darkened(0.11))
+	# The paired portals share a ledge cut into the upper cliff. The dark recesses
+	# sit behind the dressed arches, and the surviving cornice ties the piers together.
+	var ash := Color("#897667")
+	var cap := Color("#b19879")
+	world.stone(185, 106, 124.0, 31.0, 0.46, ash, 0.04)
+	world.stone(246, 114, 44.0, 28.0, 0.45, ash, 0.17)
+	world.stone(156, 71, 35.0, 8.0, 2.45, Color("#514b46"), 0.04)
+	world.stone(232, 83, 40.0, 8.0, 2.78, Color("#514b46"), 0.10)
+	world.wall([Vector2(105, 77), Vector2(134, 81)], 2.36, ash, 14.0)
+	world.wall([Vector2(176, 84), Vector2(203, 89)], 2.68, MASONRY, 14.0)
+	world.wall([Vector2(256, 96), Vector2(271, 108), Vector2(281, 128)], 1.78, ash, 13.0)
+	world.arch(Vector2(155, 81), 35.0, 2.44, MASONRY.darkened(0.06), 0.13)
+	world.arch(Vector2(232, 94), 43.0, 2.99, MASONRY, 0.13)
+	# Silhouette of the doorway lies in front of the cliff where it fills the recess.
+	var front := Vector3(-sin(0.13), 0.0, cos(0.13))
+	var along := Vector3(front.z, 0.0, -front.x)
+	for doorway in [[155.0, 81.0, 0.47, 1.84], [232.0, 94.0, 0.60, 2.24]]:
+		var foot: Vector3 = world.at(doorway[0], doorway[1], 0.36) + front * 0.34
+		var width: float = doorway[2]
+		var spring: Vector3 = foot + Vector3.UP * (float(doorway[3]) - 0.36)
+		var shadow := Color("#4a4039")
+		world.contour.quad(foot - along * width, foot + along * width, spring + along * width,
+			spring - along * width, shadow)
+		for wedge in range(8):
+			var a := float(wedge) * PI / 8.0
+			var b := float(wedge + 1) * PI / 8.0
+			world.contour.triangle(spring, spring + width * (along * cos(a) + Vector3.UP * sin(a)),
+				spring + width * (along * cos(b) + Vector3.UP * sin(b)), shadow, front)
+	world.stone(126, 77, 41.0, 19.0, 0.15, cap, 0.08, 2.71)
+	world.stone(194, 86, 39.0, 18.0, 0.14, cap, 0.14, 2.80)
+	column(world, Vector2(187, 97), 2.28)
+	column(world, Vector2(268, 112), 1.39)
+	world.steps(Vector2(151, 128), Vector2(155, 99), 27.0, 0.44, 6, cap)
+	world.steps(Vector2(229, 133), Vector2(233, 102), 31.0, 0.70, 8, cap)
+	# Two collapsed retaining walls pick up the profile of the natural terrace.
+	# Keep the exposed stair run and the west mounting shelf approach free.
+	world.wall([Vector2(181, 193), Vector2(199, 207), Vector2(216, 212)], 0.64, ash, 9.0)
+	world.wall([Vector2(239, 172), Vector2(250, 186), Vector2(254, 203)], 0.53, cap, 10.0)
+	world.steps(Vector2(268, 237), Vector2(242, 231), 32.0, 1.27, 10, cap)
+	world.steps(Vector2(153, 205), Vector2(175, 183), 27.0, 1.11, 8, ash)
+	column(world, Vector2(285, 247), 1.48)
+	column(world, Vector2(173, 149), 1.40)
+	# The smaller arch protects the separate high-ground firing position.
 	world.wall([Vector2(369, 165), Vector2(392, 166), Vector2(405, 176)], 1.22, MASONRY, 15.0)
 	world.wall([Vector2(417, 182), Vector2(434, 188), Vector2(451, 184)], 1.48, MASONRY, 17.0)
 	world.arch(Vector2(406, 178), 30.0, 1.40, MASONRY.darkened(0.09), 0.17)
-	world.wall([Vector2(479, 368), Vector2(509, 378), Vector2(540, 374)], 0.96, MASONRY, 15.0)
-	world.wall([Vector2(354, 400), Vector2(393, 406), Vector2(414, 396)], 0.59, MASONRY.darkened(0.14), 12.0)
-	for data in [[120,158,0.83], [173,149,1.40], [249,211,0.64], [287,249,1.03], [462,184,1.12], [473,357,0.91]]:
+	# Foreground remnants read as the ends of two enclosure walls, with paving
+	# fanning away from the pass and a fractured pier where they once joined.
+	world.stone(183, 408, 61.0, 28.0, 0.13, ash, -0.17)
+	world.wall([Vector2(154, 404), Vector2(176, 413), Vector2(205, 414)], 0.78, ash, 11.0)
+	world.wall([Vector2(154, 402), Vector2(149, 389)], 0.43, MASONRY, 10.0)
+	column(world, Vector2(151, 401), 1.22)
+	world.stone(380, 419, 55.0, 26.0, 0.13, ash.darkened(0.08), -0.07)
+	world.wall([Vector2(354, 400), Vector2(393, 406), Vector2(414, 396)], 0.59, ash, 12.0)
+	world.wall([Vector2(479, 368), Vector2(509, 378), Vector2(540, 374)], 0.96, ash, 15.0)
+	for data in [[120,158,0.83], [249,211,0.64], [462,184,1.12], [473,357,0.91], [410,401,0.82]]:
 		column(world, Vector2(data[0], data[1]), float(data[2]))
+	# The paving joints turn behind the walls and stop at the broken edge.
+	for joints in [[[158,402],[168,401],[184,401],[195,403]], [[160,411],[174,412],[183,414]],
+			[[363,421],[378,420],[391,422],[400,423]], [[374,415],[378,420],[378,425]]]:
+		var seam := PackedVector3Array()
+		for pair in joints:
+			seam.append(world.at(pair[0], pair[1], 0.143))
+		world.pencil(seam, 0.019, ash.darkened(0.38))
 	for pair in [[141,159], [156,159], [247,255], [439,209], [447,213], [472,366], [483,409]]:
 		var point := Vector2(pair[0], pair[1])
 		Detail.vessel(world, point, 0.0, 0.105 + fposmod(point.y * 0.043, 0.07), Color("#9b6549"))
@@ -129,30 +239,132 @@ static func build_ruins(world) -> void:
 		0.016, Color("#655445"), Color("#827153"), 1.4)
 
 static func column(world, at: Vector2, height: float) -> void:
-	world.stone(at.x, at.y, 15.0, 15.0, 0.10, MASONRY.darkened(0.19), 0.18)
-	world.stone(at.x, at.y, 12.0, 12.0, 0.12, MASONRY, 0.18, 0.09)
+	var inclination := sin(at.x * 0.076 + at.y * 0.029) * 3.1
+	var color := MASONRY.lightened(0.035)
+	world.stone(at.x, at.y, 16.0, 14.0, 0.10, MASONRY.darkened(0.23), 0.18)
+	world.stone(at.x, at.y, 13.0, 12.0, 0.12, color, 0.18, 0.09)
 	var base: Vector3 = world.at(at.x, at.y, 0.18)
-	var top: Vector3 = world.at(at.x + 2, at.y, height)
-	world.mesh.tube(PackedVector3Array([base, top]), PackedFloat32Array([0.18, 0.14]), MASONRY, 9, 0.0)
-	world.stone(at.x + 2, at.y, 11.0, 11.0, 0.08, MASONRY.lightened(0.07), 0.18, height - 0.05)
+	var top: Vector3 = world.at(at.x + inclination, at.y, height)
+	var shaft := PackedVector3Array([base, base.lerp(top, 0.11), base.lerp(top, 0.43),
+		base.lerp(top, 0.46), base.lerp(top, 0.49), top])
+	world.mesh.tube(shaft, PackedFloat32Array([0.205, 0.188, 0.174, 0.164, 0.172, 0.147]), color, 10, 0.016)
+	world.stone(at.x + inclination, at.y, 11.0 if height < 1.55 else 16.0, 10.0, 0.10,
+		color.lightened(0.06), 0.18 + inclination * 0.025, height - 0.055)
+	var face := Vector3(0.036, 0.0, 0.177)
+	world.pencil(PackedVector3Array([base.lerp(top, 0.15) + face, base.lerp(top, 0.35) + face * 0.98,
+		base.lerp(top, 0.43) + face * 0.95]), 0.023, color.darkened(0.48))
 
 static func build_ossuary(world) -> void:
-	# Paired ribs curve over the sandy hollow with different fractures and burial depths.
-	for i in range(5):
-		var x := 601.0 + i * 29.0
-		var y := 169.0 + sin(i * 0.60) * 12.0
-		rib(world, Vector2(x, y), Vector2(-21, 30), 2.52 - i * 0.21, false)
-		rib(world, Vector2(x - 8, y + 93.0), Vector2(24, -29), 2.09 - i * 0.22, true)
-	for i in range(5):
-		var x := 619.0 + i * 22.0
-		var head: Vector3 = world.at(x, 215.0, 0.18 + i * 0.024)
-		world.ellipsoid(head, Vector3(0.25, 0.23, 0.19), BONE.darkened(0.14), 9, 5)
-		world.ellipsoid(head + Vector3(0, 0.20, 0), Vector3(0.11, 0.15, 0.11), BONE, 8, 4)
-	for p in [Vector2(568, 237), Vector2(587, 264), Vector2(648, 269), Vector2(703, 247), Vector2(713, 299)]:
-		world.stone(p.x, p.y, 13.0, 7.0, 0.13, BONE.darkened(0.10), p.x * 0.029)
-	for i in range(7):
-		var p := Vector2(710 + i * 5.1, 211 + sin(i * 0.61) * 13.0)
-		world.ellipsoid(world.at(p.x,p.y,0.19), Vector3(0.16,0.20,0.15), BONE.darkened(0.20 + i * 0.012), 8, 5)
+	# The collapsed chest has two uneven banks with the spine displaced toward the ridge.
+	var exposed := [
+		[Vector2(582, 198), Vector2(9, -2), 0.76, 0.18, true],
+		[Vector2(607, 194), Vector2(18, -11), 2.68, 0.22, false],
+		[Vector2(638, 181), Vector2(21, -5), 3.04, 0.25, false],
+		[Vector2(667, 176), Vector2(18, -2), 2.85, 0.23, false],
+		[Vector2(699, 180), Vector2(22, 2), 2.19, 0.20, false],
+		[Vector2(728, 186), Vector2(13, -6), 1.36, 0.18, true],
+		[Vector2(593, 265), Vector2(7, -4), 0.72, 0.16, true],
+		[Vector2(617, 270), Vector2(-26, -13), 2.54, 0.25, false],
+		[Vector2(652, 274), Vector2(-24, -19), 3.01, 0.27, false],
+		[Vector2(684, 272), Vector2(-7, -5), 1.08, 0.22, true],
+		[Vector2(709, 266), Vector2(-16, -15), 2.42, 0.22, false],
+		[Vector2(731, 259), Vector2(-13, -9), 1.65, 0.19, false],
+	]
+	world.sculpture("蚀沙古台 · 风白埋骨", func():
+		for index in range(exposed.size()):
+			var part: Array = exposed[index]
+			ossuary_rib(world, part[0], part[1], part[2], part[3], part[4], index)
+		var spine := [Vector2(620, 226), Vector2(642, 219), Vector2(663, 216), Vector2(686, 219),
+			Vector2(708, 222), Vector2(728, 217), Vector2(744, 208)]
+		for index in range(spine.size()):
+			var previous: Vector2 = spine[maxi(index - 1, 0)]
+			var following: Vector2 = spine[mini(index + 1, spine.size() - 1)]
+			ossuary_vertebra(world, spine[index], previous.direction_to(following), index)
+		for data in [[Vector2(577, 241), Vector2(588, 237), 0.18], [Vector2(634, 244), Vector2(647, 249), 0.20],
+				[Vector2(696, 246), Vector2(708, 240), 0.17], [Vector2(711, 296), Vector2(726, 295), 0.125]]:
+			var a: Vector3 = world.from_floor(data[0], 0.05)
+			var end: Vector3 = world.from_floor(data[1], 0.10)
+			world.mesh.smooth_tube(PackedVector3Array([a, a.lerp(end, 0.50) + Vector3.UP * 0.044, end]),
+				PackedFloat32Array([data[2] * 0.65, data[2] * 0.45, data[2]]), BONE.darkened(0.21), 8, 0.06)
+	)
+
+static func ossuary_rib(world, root: Vector2, lean: Vector2, height: float, girth: float, broken: bool, index: int) -> void:
+	var path := PackedVector3Array()
+	var phase := index * 2.19
+	var side := lean.normalized().orthogonal()
+	var length := 13 if height > 1.5 else 9
+	for step in range(length):
+		var portion := step / float(length - 1)
+		var offset := lean * (0.15 * portion + 0.85 * pow(portion, 1.89))
+		offset += side * sin(PI * portion) * (3.8 + cos(phase) * 2.5)
+		var rise := lerpf(-0.13, height, sin(portion * 1.24) / sin(1.24))
+		path.append(world.from_floor(root + offset, rise))
+	var tone := BONE.lerp(Color("#d8c29e"), 0.22 + 0.23 * sin(phase * 0.61))
+	var previous := PackedVector3Array()
+	for step in range(length):
+		var portion := step / float(length - 1)
+		var tangent := path[maxi(0, step - 1)].direction_to(path[mini(length - 1, step + 1)])
+		var wide := tangent.cross(Vector3.UP).normalized()
+		var narrow := wide.cross(tangent)
+		var radius := girth * lerpf(1.19, 0.63 if broken else 0.26, portion)
+		radius *= 0.94 + 0.13 * sin(PI * portion) + 0.046 * sin(portion * 8.19 + phase)
+		var ring := PackedVector3Array()
+		for edge in range(10):
+			var bearing := edge * TAU / 10.0 + 0.22 * sin(phase + portion * 2.3)
+			var rough := 1.0 + sin(edge * 3.71 + step * 0.81 + phase) * 0.048
+			var push := narrow * cos(bearing) * 0.69 + wide * sin(bearing) * 1.17
+			var chip := 0.056 * sin(edge * 2.71 + phase) if broken and step == length - 1 else 0.0
+			ring.append(path[step] + push * radius * rough + tangent * chip)
+		if step > 0:
+			var buried := 1.0 - smoothstep(0.05, 0.78, path[step].y)
+			var coat := tone.lerp(Color("#92765d"), buried * 0.72)
+			for edge in range(10):
+				var next := (edge + 1) % 10
+				var panel := PackedVector3Array([previous[edge], ring[edge], ring[next], previous[next]])
+				var shade := coat.darkened(0.15 if edge in [3, 4, 5, 6] else 0.022)
+				world.mesh.quad(panel[0], panel[3], panel[2], panel[1], shade)
+				if edge in [0, 7] and step in [3 + index % 3, 7, length - 2]:
+					ossuary_mark(world, panel, shade.darkened(0.47), phase + edge)
+		if step == length - 1:
+			ossuary_cut(world, ring, path[step], tangent, tone, broken)
+		previous = ring
+
+static func ossuary_mark(world, panel: PackedVector3Array, tint: Color, phase: float) -> void:
+	var normal := (panel[2] - panel[0]).cross(panel[1] - panel[0]).normalized()
+	var skew := sin(phase) * 0.20
+	world.contour.panel_stroke(panel, PackedVector2Array([Vector2(0.16, 0.23), Vector2(0.43, 0.37 + skew),
+		Vector2(0.63, 0.40), Vector2(0.89, 0.61 - skew)]), 0.020, Color(tint, 0.87), normal)
+
+static func ossuary_cut(world, lip: PackedVector3Array, center: Vector3, tangent: Vector3, tone: Color, broken: bool) -> void:
+	var core := center - tangent * (0.095 if broken else 0.020)
+	for index in range(lip.size()):
+		var next := (index + 1) % lip.size()
+		if broken:
+			var a := core + (lip[index] - center) * (0.47 + sin(index * 2.37) * 0.15)
+			var b := core + (lip[next] - center) * (0.47 + sin(next * 2.37) * 0.15)
+			world.mesh.quad(lip[index], lip[next], b, a, tone.lightened(0.075))
+			world.mesh.triangle(a, b, core, Color("#66513f").lightened(index % 3 * 0.046))
+		else:
+			world.mesh.triangle(lip[index], lip[next], core, tone.darkened(0.08))
+
+static func ossuary_vertebra(world, foot: Vector2, direction: Vector2, index: int) -> void:
+	var phase := index * 2.42
+	var scale := 0.83 + cos(index * 0.53) * 0.15
+	var bed: Vector3 = world.from_floor(foot, 0.13 + sin(phase) * 0.035)
+	var axis: Vector3 = bed.direction_to(world.from_floor(foot + direction * 22.0, bed.y))
+	var across := axis.cross(Vector3.UP)
+	var shade := BONE.darkened(0.16 + 0.039 * sin(phase))
+	world.ellipsoid(bed, Vector3(0.37, 0.24, 0.30) * scale, shade, 11, 5)
+	world.ellipsoid(bed - axis * (0.20 * scale), Vector3(0.27, 0.26, 0.28) * scale,
+		shade.lightened(0.079), 10, 5)
+	var attachment := bed + across * 0.23 * scale + Vector3.UP * 0.19
+	var crest := bed + Vector3.UP * (0.40 + sin(phase) * 0.076) - axis * 0.037
+	var arch := PackedVector3Array([attachment, crest + across * 0.19 * scale,
+		crest, crest - across * 0.18 * scale, bed - across * 0.21 * scale + Vector3.UP * 0.16])
+	world.mesh.smooth_tube(arch, PackedFloat32Array([0.12, 0.104, 0.084, 0.081, 0.10]), shade, 8, 0.07)
+	var thorn := crest + axis * (0.20 + sin(phase) * 0.036) + Vector3.UP * (0.19 + cos(phase) * 0.065)
+	world.mesh.smooth_tube(PackedVector3Array([crest - Vector3.UP * 0.025, crest.lerp(thorn, 0.48), thorn]),
+		PackedFloat32Array([0.13, 0.082, 0.031]), shade.lightened(0.052), 8, 0.060)
 
 static func rib(world, start: Vector2, curl: Vector2, height: float, broken: bool) -> void:
 	var curve := PackedVector3Array()

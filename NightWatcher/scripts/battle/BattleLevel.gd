@@ -291,8 +291,8 @@ func open_night_perks() -> void:
 		return
 	perk_open = true
 	cancel_pointer_attack()
-	hud.update_status(self)
 	paused = true
+	hud.update_status(self)
 	gift_panel = NightGift.new()
 	add_child(gift_panel)
 	gift_panel.chosen.connect(choose_night_perk, CONNECT_ONE_SHOT)
@@ -405,9 +405,12 @@ func use_bridge() -> void:
 	combat.reroute()
 	announce("西桥升起，敌人转向东岸" if bridge_closed == 0 else "东桥升起，敌人转向西岸")
 
+func light_radius_scale() -> float:
+	return 0.70 if biome == 0 and weather_left > 0.0 else 1.0
+
 func refresh_lights() -> void:
 	var active: Array[Dictionary] = []
-	var radius_scale := 0.70 if biome == 0 and weather_left > 0.0 else 1.0
+	var radius_scale := light_radius_scale()
 	if fire_hp > 0.0:
 		active.append({"position": fire_point, "radius": lerpf(62.0, 219.0, fire_hp / 100.0) * radius_scale,
 			"energy": 1.33, "height": scenery.model.hearth_light.position.y})
@@ -439,10 +442,12 @@ func refresh_view() -> void:
 	scenery.update_art()
 	hud.update_status(self)
 
-func hurt_fire(amount: float) -> void:
+func hurt_fire(amount: float, enemy_hit := false) -> void:
 	if ended:
 		return
 	fire_hp = maxf(0.0, fire_hp - amount)
+	if enemy_hit and amount > 0.0:
+		hud.flash_fire()
 	if fire_hp <= 0.0:
 		finish_battle(false)
 
@@ -551,10 +556,12 @@ func open_build(index: int) -> void:
 		item["compatible"] = item["kind"] == support_kind[index]
 		item["site"] = support_name[index]
 	hud.open_build(options, combat.upgrade_options(index), index, support_muzzle(index))
+	hud.update_inspection(self)
 
 func close_build() -> void:
 	open_slot = -1
 	hud.close_build()
+	hud.update_inspection(self)
 
 func build_selected(kind: int) -> void:
 	if not night and not ended and open_slot >= 0 and support_kind[open_slot] == TOWER_IDS[kind] and combat.build(open_slot, TOWER_IDS[kind]):
@@ -623,6 +630,7 @@ func toggle_pause() -> void:
 		close_build()
 		return
 	paused = not paused
+	hud.update_inspection(self)
 	if paused:
 		cancel_pointer_attack()
 		hud.show_pause()

@@ -18,7 +18,15 @@
 
 胸廓和手臂分别用 Godot 生成，肋骨有不同的弧度和断面，前臂由两条长骨组成，手掌和手指分段成形。碰撞取自骨面网格，表面的铅笔线单独绘制。骨弩用支架固定在眼窝边，箭矢从模型上的挂点射出。[胸廓模型](NightWatcher/scripts/model/ValleyRibs.gd) · [手臂模型](NightWatcher/scripts/model/ValleyArms.gd)
 
-[战场着色器](NightWatcher/scripts/model/battle_model.gdshader) 给模型叠加色洗与铅笔纹理。深度描边随模型遮挡。篝火、提灯和火龛给实时三维模型打光，[LightManager](NightWatcher/scripts/battle/LightManager.gd) 沿着实际地形网格检测光线是否被挡住。陨王遗谷的地面暖光、树根和石沿亮边随篝火火势淡出。护具、武器和敌人关节由代码构建，配合奔跑、挥击、受击和短暂停顿。环境工事的实物模型在 [RelicWorks](NightWatcher/scripts/model/RelicWorks.gd) 中绘制。
+黑曜长墙的裂颅独立建模，霜层、凹陷眼窝和破损金属箍都沿颅骨形体绘制。半埋的眼窝保留了骨弩安装点，玩家可以从颅骨外侧靠近操作。 [霜蚀裂颅模型](NightWatcher/scripts/model/ObsidianRelic.gd)
+
+蚀沙古台的砂岩沿不规则层理逐层削出岩檐。遗迹双拱、半截墙和石阶共用依崖的台基，东侧用独立的断肋和椎骨表现半埋的遗骸。浅沙色块和火光铺在实际地表，近处的岩檐遮住后方地面。 [蚀沙古台模型](NightWatcher/scripts/model/Sandstone.gd)
+
+枯木环堡的盘根沿着残墙生长，三维水面和缓坡石岸沿堡墙相接。水面上的色洗缓慢漂移，岸边用断续浅线画出水纹。水面沿场景的水域边界绘制，两座吊桥的通行由真实位置和机关状态决定。 [枯木环堡模型](NightWatcher/scripts/model/RootKeep.gd) · [水面材质](NightWatcher/scripts/model/root_keep_water.gdshader)
+
+战场材质用大片色洗和少量铅笔排线交代结构。三维深度生成的轮廓每秒换七次笔迹，模拟手绘线条轻微游移、偶尔断开的效果。远处的低雾随场景的真实深度和高度变化，石墙、树干和前景地面彼此遮挡。 [战场材质](NightWatcher/scripts/model/battle_model.gdshader) · [实时描边](NightWatcher/scripts/model/relief_ink.gdshader)
+
+篝火、提灯和火龛给实时三维模型打光，灯光规则沿地形网格检测遮挡。陨王遗谷的地面暖光、树根和石沿亮边随篝火火势淡出。护具、武器和敌人关节由代码构建，支持奔跑、起手、挥击和受击。夜行爬尸会先压低重心蓄力，前脚踩下时挥爪，再从前倾姿势收回。 [光照规则](NightWatcher/scripts/battle/LightManager.gd) · [环境工事](NightWatcher/scripts/model/RelicWorks.gd)
 
 巡夜人提灯由原始文字描述在 Tripo Studio 生成，经 GLB 导入 Godot。道具包含 3,488 个三角面和一张底色贴图。它保留原始颜色贴图，使用战场共用的哑光色洗。手部挂点与提灯光源由 Godot 驱动。 [提灯模型](NightWatcher/assets/props/watch_lantern.glb)
 

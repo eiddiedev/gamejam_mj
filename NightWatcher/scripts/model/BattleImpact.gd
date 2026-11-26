@@ -28,6 +28,7 @@ var combat: Node2D
 var fragments: Array[Fragment] = []
 var warm_materials: Array[StandardMaterial3D] = []
 var chalk_materials: Array[StandardMaterial3D] = []
+var curse_pigment: StandardMaterial3D
 var random := RandomNumberGenerator.new()
 var glint: OmniLight3D
 var ribbon := ImmediateMesh.new()
@@ -49,6 +50,7 @@ var camera_velocity := Vector2.ZERO
 var feedback_left := 0.0
 var air: AudioStreamPlayer
 var contact: AudioStreamPlayer
+var rite_voice: AudioStreamPlayer
 var sounds: Dictionary = {}
 
 func setup(model: Node3D, fight: Node2D) -> void:
@@ -56,6 +58,9 @@ func setup(model: Node3D, fight: Node2D) -> void:
 	combat = fight
 	var wedge := PrismMesh.new()
 	wedge.size = Vector3.ONE
+	curse_pigment = StandardMaterial3D.new()
+	curse_pigment.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	curse_pigment.albedo_color = Color("#d887ba")
 	for index in range(SPARK_COLORS.size()):
 		var amber := StandardMaterial3D.new()
 		amber.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -106,13 +111,17 @@ func setup(model: Node3D, fight: Node2D) -> void:
 	combat.blade_cuts.connect(shear)
 	combat.melee_contact.connect(melee_touch)
 	combat.enemy_contact.connect(enemy_touch)
+	combat.herald_cast.connect(herald_cast)
 	air = AudioStreamPlayer.new()
 	air.volume_db = -14.0
 	add_child(air)
 	contact = AudioStreamPlayer.new()
 	contact.volume_db = -9.5
 	add_child(contact)
-	for voice in ["swish","shear","bone","iron","thud"]:
+	rite_voice = AudioStreamPlayer.new()
+	rite_voice.volume_db = -13.0
+	add_child(rite_voice)
+	for voice in ["swish","shear","bone","iron","thud","rite"]:
 		sounds[voice] = texture_of_sound(voice)
 
 func camera_offset() -> Vector2:
@@ -150,6 +159,22 @@ func enemy_touch(where: Vector2, direction: Vector2, heavy: bool) -> void:
 		play_voice(contact,"thud" if heavy else "bone")
 		feedback_left = 0.052
 
+func herald_cast(where: Vector2, doused: PackedVector2Array) -> void:
+	var origin: Vector3 = landscape.screen_floor(where,0.31)
+	for index in range(12):
+		emit_fragment(origin,index,true,Vector3.UP*0.57,curse_pigment)
+	for site in doused:
+		var bowl: Vector3 = landscape.screen_floor(site,0.80)
+		for index in range(7):
+			var tip := Vector3.UP * (0.60 + 0.14 * index)
+			emit_fragment(bowl,index,true,tip,curse_pigment if index % 3 == 0 else null)
+	var player: Vector2 = combat.watcher.position
+	var force := 1.0 - smoothstep(160.0, 410.0, player.distance_to(where))
+	if force > 0.0:
+		kick(where.direction_to(player),1.33*force)
+	rite_voice.volume_db = lerpf(-24.0,-13.0,force)
+	play_voice(rite_voice,"rite")
+
 func play_voice(player: AudioStreamPlayer, title: String) -> void:
 	player.stream = sounds[title]
 	player.pitch_scale = random.randf_range(0.95,1.09)
@@ -158,7 +183,7 @@ func play_voice(player: AudioStreamPlayer, title: String) -> void:
 func texture_of_sound(title: String) -> AudioStreamWAV:
 	var swoosh := title in ["swish","shear"]
 	var hollow := title in ["bone","thud"]
-	var duration := 0.14 if title == "swish" else 0.23 if title == "shear" else 0.26 if title == "thud" else 0.18
+	var duration := 0.14 if title == "swish" else 0.23 if title == "shear" else 0.26 if title == "thud" else 0.34 if title == "rite" else 0.18
 	var count := roundi(duration * SAMPLE_RATE)
 	var stream := AudioStreamWAV.new()
 	stream.format = AudioStreamWAV.FORMAT_16_BITS
@@ -185,6 +210,9 @@ func texture_of_sound(title: String) -> AudioStreamWAV:
 			var skin := sin(phase)*exp(-t*(43.0 if title == "bone" else 30.0))
 			var crack := (raw*0.29 + low*1.05)*exp(-t*112.0)
 			output = (skin*0.51 + crack + sin(TAU*485.0*t)*exp(-t*80.0)*0.14)*0.86
+		elif title == "rite":
+			var note := sin(TAU * (102.0*t - 62.0*t*t)) * 0.61 + sin(TAU * 137.0*t) * 0.23
+			output = note * smoothstep(0.0,0.032,t) * exp(-t*12.0) + low * exp(-t*26.0) * 0.19
 		else:
 			var clang := (sin(TAU*1368.0*t)*0.26 + sin(TAU*1893.0*t)*0.16 + sin(TAU*2461.0*t)*0.14)*exp(-t*39.0)
 			output = (clang + raw*exp(-t*156.0)*0.32 + sin(TAU*212.0*t)*exp(-t*93.0)*0.23)*0.87
@@ -309,7 +337,8 @@ func shatter(_species: int, _xp: int, where: Vector2) -> void:
 	for index in range(7):
 		emit_fragment(origin, index, index < 2)
 
-func emit_fragment(origin: Vector3, index: int, spark: bool, directional := Vector3.ZERO) -> void:
+func emit_fragment(origin: Vector3, index: int, spark: bool, directional := Vector3.ZERO,
+		pigment: StandardMaterial3D = null) -> void:
 	var fragment := fragments[cursor]
 	cursor = (cursor + 1) % fragments.size()
 	var angle := float(index) * 2.399 + random.randf_range(-0.37, 0.37)
@@ -324,7 +353,7 @@ func emit_fragment(origin: Vector3, index: int, spark: bool, directional := Vect
 	fragment.body.position = origin + Vector3(cos(angle), 0.0, sin(angle)) * 0.08
 	fragment.body.look_at(fragment.body.position + fragment.velocity)
 	fragment.body.scale = fragment.size
-	fragment.body.material_override = (warm_materials if spark else chalk_materials)[index % SPARK_COLORS.size()]
+	fragment.body.material_override = pigment if pigment != null else (warm_materials if spark else chalk_materials)[index % SPARK_COLORS.size()]
 	fragment.body.show()
 
 func step(delta: float) -> void:

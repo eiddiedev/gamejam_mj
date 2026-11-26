@@ -18,6 +18,11 @@ var puppets: Puppets
 var impact: Impact
 var combat_camera: Camera2D
 var fire_particles: CPUParticles2D
+var support_range: MeshInstance3D
+var support_range_material: StandardMaterial3D
+var range_origin := Vector2.ZERO
+var range_current := 0.0
+var range_planned := 0.0
 var colors := PackedColorArray([Color("#efb963"), Color("#ffdba1"), Color("#ee7d4c"), Color("#00000000")])
 
 func initialize(level) -> void:
@@ -53,6 +58,59 @@ func initialize(level) -> void:
 	fire.color_ramp = fade
 	add_child(fire)
 	fire_particles = fire
+	support_range = MeshInstance3D.new()
+	support_range.name = "Support range on the ground"
+	support_range.mesh = ImmediateMesh.new()
+	support_range.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	support_range.hide()
+	model.add_child(support_range)
+	support_range_material = StandardMaterial3D.new()
+	support_range_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	support_range_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	support_range_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	support_range_material.vertex_color_use_as_albedo = true
+	# Draw after the full-screen ink composite while retaining scene depth.
+	support_range_material.render_priority = 90
+
+func hide_support_range() -> void:
+	support_range.hide()
+
+func show_support_range(at: Vector2, current: float, planned: float) -> void:
+	if current <= 0.0 and planned <= 0.0:
+		hide_support_range()
+		return
+	support_range.show()
+	if at == range_origin and current == range_current and planned == range_planned:
+		return
+	range_origin = at
+	range_current = current
+	range_planned = planned
+	var mesh := support_range.mesh as ImmediateMesh
+	mesh.clear_surfaces()
+	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, support_range_material)
+	if current > 0.0:
+		trace_support_range(mesh, at, current, false)
+	if planned > 0.0 and not is_equal_approx(current, planned):
+		trace_support_range(mesh, at, planned, true)
+	mesh.surface_end()
+
+func trace_support_range(mesh: ImmediateMesh, at: Vector2, radius: float, planned: bool) -> void:
+	const SEGMENTS := 120
+	const ABOVE_GROUND := 0.11
+	var center := at + Vector2(0, ABOVE_GROUND * Landscape.PIXELS * cos(Landscape.PITCH))
+	var hue := Color("#f1c88dbe") if not planned else Color("#e6cd9cb0")
+	for segment in SEGMENTS:
+		if planned and segment % 6 >= 4:
+			continue
+		var a := Vector2.from_angle(TAU * segment / SEGMENTS)
+		var b := Vector2.from_angle(TAU * (segment + 1) / SEGMENTS)
+		var left := model.screen_floor(center + a * (radius - 1.45), ABOVE_GROUND)
+		var right := model.screen_floor(center + b * (radius - 1.45), ABOVE_GROUND)
+		var far_left := model.screen_floor(center + a * (radius + 1.45), ABOVE_GROUND)
+		var far_right := model.screen_floor(center + b * (radius + 1.45), ABOVE_GROUND)
+		mesh.surface_set_color(hue)
+		for p in [left, right, far_right, left, far_right, far_left]:
+			mesh.surface_add_vertex(p)
 
 func attach_combat() -> void:
 	battle.combat.campfire.hide()

@@ -14,6 +14,9 @@ const MIST := Color("#b4c2b8")
 const BRASS := Color("#a6875a")
 const GOLD := Color("#efc280")
 const FIRE := Color("#f6904e")
+const FIRE_WARN := Color("#ff9874")
+const LOW_FIRE := 0.25
+const FIRE_FLASH_TIME := 0.72
 const INK := Color("#17201f")
 const FONT = preload("res://typeface.tres")
 const HEADING = preload("res://heading.tres")
@@ -26,6 +29,7 @@ var root: Control
 var timer: Label
 var phase: Label
 var fire_label: Label
+var fire_warning: Label
 var health_label: Label
 var rank_label: Label
 var slain_label: Label
@@ -56,6 +60,7 @@ var instruments: Control
 var action: Control
 var fullscreen: Button
 var health_flash := 0.0
+var fire_flash := 0.0
 var xp_flash := 0.0
 var shown_kills := 0
 var inspection: Control
@@ -101,6 +106,10 @@ func _ready() -> void:
 	fire_label = label(root, "100", 17, Rect2(57, 16, 42, 34), PAPER)
 	fire_label.tooltip_text = "篝火火势"
 	fire_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	fire_warning = label(root, "", 14, Rect2(23, 57, 163, 22), FIRE_WARN, HEADING)
+	fire_warning.add_theme_color_override("font_outline_color", Color("#12171a"))
+	fire_warning.add_theme_constant_override("outline_size", 3)
+	fire_warning.hide()
 	resource = label(root, "", 16, Rect2(139, 16, 44, 34), PAPER)
 	bone_label = label(root, "", 16, Rect2(216, 16, 44, 34), PAPER)
 	oil_label = label(root, "", 16, Rect2(1179, 16, 62, 34), PAPER)
@@ -159,8 +168,9 @@ func update_status(level) -> void:
 	nightfall = level.night
 	phase.text = "第%d夜 · %s" % [level.phases.night_number, "深夜" if nightfall else "黄昏"]
 	timer.text = "清理余敌" if nightfall and seconds == 0 else "%02d:%02d" % [seconds / 60, seconds % 60]
+	fire_fraction = clampf(level.fire_hp / 100.0, 0.0, 1.0)
 	fire_label.text = str(ceili(level.fire_hp))
-	fire_label.modulate = Color("#ffc18e") if level.fire_hp < 30.0 else Color.WHITE
+	update_fire_warning()
 	resource.text = str(level.run.embers)
 	bone_label.text = str(level.run.bone)
 	oil_label.text = "%d%%" % ceili(level.oil)
@@ -187,7 +197,6 @@ func update_status(level) -> void:
 		xp_flash = 0.27
 	shown_kills = kills
 	slain_label.text = "击杀 %d" % kills
-	fire_fraction = clampf(level.fire_hp / 100.0, 0.0, 1.0)
 	oil_fraction = clampf(level.oil / 100.0, 0.0, 1.0)
 	time_fraction = level.phases.progress()
 	advance.visible = not nightfall and not level.ended
@@ -212,52 +221,79 @@ func toggle_fullscreen() -> void:
 
 func update_inspection(level) -> void:
 	inspection_panel.hide()
-	inspection.hide()
-	if level.paused or level.ended or is_instance_valid(menu):
+	if level.paused or level.ended:
+		inspection.hide()
+		level.scenery.hide_support_range()
 		return
-	var cursor := root.get_local_mouse_position()
+	var selecting := is_instance_valid(menu)
+	var selected: int = level.open_slot if selecting else hovered_support(level)
+	if selected < 0:
+		inspection.hide()
+		level.scenery.hide_support_range()
+		return
+	var tower = level.combat.towers[selected]
+	inspect_at = level.slot_points[selected]
+	inspect_marker = level.get_global_transform_with_canvas() * level.support_muzzle(selected)
+	inspect_radius = level.combat.inspect_radius(selected)
+	var current := inspect_radius
+	var planned := 0.0
+	var title: String = level.support_name[selected]
+	if tower.level == 0 or (tower.kind == "brazier" and not tower.lit) or (tower.kind == "oil" and tower.spent and tower.burn <= 0.0):
+		planned = current
+		current = 0.0
+	elif selecting and tower.level < 3:
+		planned = level.combat.inspect_radius(selected, true)
+	level.scenery.show_support_range(inspect_at, current, planned)
+	inspection.show()
+	inspection.queue_redraw()
+	if not selecting:
+		if tower.level == 0:
+			inspection_caption.text = "%s · 未修缮" % title
+		else:
+			inspection_caption.text = "%s · Lv.%d" % [title, tower.level]
+		inspection_panel.position = (inspect_marker + Vector2(-90, -54)).clamp(Vector2(12, 107), Vector2(1088, 675))
+		inspection_panel.show()
+
+func hovered_support(level) -> int:
+	var cursor: Vector2 = level.get_global_mouse_position()
+	var points: Array[Vector2] = level.slot_points
 	var selected := -1
 	var nearest := 25.0 ** 2
-	var points: Array[Vector2] = level.slot_points
-	var works = level.scenery.reliquary
-	var camera: Camera3D = level.scenery.model.camera
 	for index in points.size():
 		var distance := cursor.distance_squared_to(points[index])
-		var marker := points[index]
-		if is_instance_valid(works) and index < works.cradles.size():
-			marker = camera.unproject_position(works.cradles[index].global_position)
-			distance = minf(distance, cursor.distance_squared_to(marker))
+		distance = minf(distance, cursor.distance_squared_to(level.support_muzzle(index)))
 		if distance < nearest:
 			nearest = distance
 			selected = index
-			inspect_marker = marker
-	if selected < 0:
-		return
-	var title: String = level.support_name[selected]
-	var tower = level.combat.towers[selected]
-	inspect_at = points[selected]
-	inspect_radius = level.combat.inspect_radius(selected) if level.combat.has_method("inspect_radius") else 0.0
-	inspection_caption.text = title if tower.level == 0 else "%s · Lv.%d" % [title, tower.level]
-	inspection_panel.position = (inspect_marker + Vector2(-90, -54)).clamp(Vector2(12, 107), Vector2(1088, 675))
-	inspection.show()
-	inspection.queue_redraw()
-	inspection_panel.show()
+	return selected
 
 func draw_inspection() -> void:
 	var at := inspect_marker
 	inspection.draw_arc(at, 18.0, 0, TAU, 34, Color("#e9c586b8"), 1.25, true)
-	if inspect_radius > 0.0:
-		inspection.draw_arc(inspect_at, inspect_radius, 0, TAU, 96, Color("#ecc8847a"), 1.2, true)
 	for direction in [Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]:
 		inspection.draw_line(at + direction * 14.0, at + direction * 22.0, GOLD, 1.0, true)
 
 func next_frame(delta: float) -> void:
 	clock += delta
 	health_flash = maxf(0.0, health_flash - delta)
+	fire_flash = maxf(0.0, fire_flash - delta)
 	xp_flash = maxf(0.0, xp_flash - delta)
 	notice_life = maxf(0, notice_life - delta)
 	notice_plate.modulate.a = minf(notice_life * 2.0, 1.0)
 	notice_plate.visible = notice_life > 0.0
+
+func flash_fire() -> void:
+	fire_flash = FIRE_FLASH_TIME
+	update_fire_warning()
+	instruments.queue_redraw()
+
+func update_fire_warning() -> void:
+	var low := fire_fraction <= LOW_FIRE
+	var attacked := fire_flash > 0.0
+	fire_warning.visible = low or attacked
+	fire_warning.text = "篝火受袭" if attacked else "火势将熄"
+	fire_label.modulate = Color.WHITE.lerp(FIRE_WARN, 0.85 if low or attacked else 0.0)
+	environment.position.y = 83.0 if fire_warning.visible else 63.0
 
 func announce(message: String) -> void:
 	notice.text = message
@@ -276,7 +312,7 @@ func open_build(items: Array[Dictionary], current: Dictionary, slot_index: int,
 		if items[index].get("compatible", true):
 			shown.append(index)
 	var width := 275.0
-	var height := 190.0 if not current.is_empty() else maxf(129.0, 65.0 + shown.size() * 51.0)
+	var height := 190.0 if not current.is_empty() else maxf(144.0, 70.0 + shown.size() * 66.0)
 	var open_right := anchor.x + width + 49.0 < 1280.0
 	var x := anchor.x + 27.0 if open_right else anchor.x - width - 27.0
 	var y := clampf(anchor.y - height * 0.46, 111.0, 742.0 - height)
@@ -294,9 +330,9 @@ func open_build(items: Array[Dictionary], current: Dictionary, slot_index: int,
 			centered(menu, "此处没有可修复的工事", 14, Rect2(20, 46, 235, 48), MIST)
 		for row in shown.size():
 			var index := shown[row]
-			var top := 46.0 + row * 51.0
+			var top := 46.0 + row * 66.0
 			var item: Dictionary = items[index]
-			var option := button(menu, "", Rect2(16, top, 243, 46), build_requested.emit.bind(index), 14)
+			var option := button(menu, "", Rect2(16, top, 243, 63), build_requested.emit.bind(index), 14)
 			option.disabled = not item["allowed"]
 			option.tooltip_text = "%s · %s" % [TOWERS[index], item.get("description", DESCRIPTIONS[index])]
 			gear_buttons[index] = option
@@ -306,6 +342,7 @@ func open_build(items: Array[Dictionary], current: Dictionary, slot_index: int,
 			emblem.draw.connect(draw_tower_emblem.bind(emblem, index))
 			label(option, TOWERS[index], 16, Rect2(52, 1, 157, 24), PAPER, HEADING)
 			label(option, str(item["cost"]), 12, Rect2(52, 24, 169, 17), GOLD)
+			label(option, DESCRIPTIONS[index], 12, Rect2(52, 41, 182, 17), MIST)
 			var shortcut := label(option, str(index + 1), 13, Rect2(211, 5, 21, 22), MIST)
 			shortcut.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	else:
@@ -376,10 +413,18 @@ func draw_instruments() -> void:
 	var ui := instruments
 	draw_bezel(ui, Rect2(16, 13, 255, 42), Color("#101a20f2"), BRASS.darkened(0.20))
 	var fire_seal := Vector2(39, 34)
-	ui.draw_circle(fire_seal, 13, Color("#352925"), true, -1.0, true)
-	ui.draw_arc(fire_seal, 13.2, PI * 0.80, PI * 2.18, 30, Color("#695344"), 1.2, true)
+	var low := fire_fraction <= LOW_FIRE
+	var flash := ease(fire_flash / FIRE_FLASH_TIME, 2.0)
+	if flash > 0.0 or low:
+		var tint := Color("#e87859").lerp(FIRE_WARN, flash)
+		var strength := maxf(flash, 0.41 if low else 0.0)
+		ui.draw_rect(Rect2(24, 19, 72, 29), Color(tint, strength * 0.13))
+		ui.draw_arc(fire_seal, 14.7 + 3.4 * (1.0 - flash), 0, TAU, 36, Color(tint, strength * 0.86), 1.5, true)
+		ui.draw_line(Vector2(22, 54), Vector2(98, 54), Color(tint, strength), 1.6, true)
+	ui.draw_circle(fire_seal, 13, Color("#352925").lerp(Color("#592a24"), flash), true, -1.0, true)
+	ui.draw_arc(fire_seal, 13.2, PI * 0.80, PI * 2.18, 30, Color("#695344").lerp(FIRE_WARN, flash), 1.2, true)
 	if fire_fraction > 0.0:
-		var heat := Color("#ed7258") if fire_fraction < 0.30 else FIRE
+		var heat := FIRE_WARN if low else FIRE
 		ui.draw_arc(fire_seal, 13.2, PI * 0.80, PI * (0.80 + 1.38 * fire_fraction), 30, heat, 1.55, true)
 	draw_flame(ui, fire_seal, 0.57, GOLD.darkened(0.70 if fire_fraction == 0.0 else 0.0),
 		sin(clock * 4.2) * 1.1)

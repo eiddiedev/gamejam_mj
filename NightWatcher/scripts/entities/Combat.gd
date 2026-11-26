@@ -6,6 +6,7 @@ signal charged_cut(where: Vector2, direction: Vector2)
 signal blade_cuts(where: Vector2, direction: Vector2, heavy: bool)
 signal melee_contact(where: Vector2, direction: Vector2, weight: float, armored: bool, heavy: bool)
 signal enemy_contact(where: Vector2, direction: Vector2, heavy: bool)
+signal herald_cast(where: Vector2, extinguished: PackedVector2Array)
 
 const Slot = preload("res://scripts/entities/TowerController.gd")
 const Enemy = preload("res://scripts/entities/EnemyController.gd")
@@ -36,6 +37,8 @@ const TOWERS := {
 	},
 }
 const TOWER_ORDER := ["brazier", "ballista", "barricade", "oil"]
+const BARRICADE_LURE := 35.0
+const BARRICADE_LIGHT := 76.0
 const SPECIES := [
 	[33.0, 54.0, 5.5, 0.0, Vector2i(3, 2)],
 	[27.0, 78.0, 8.0, 0.0, Vector2i(4, 2)],
@@ -55,6 +58,8 @@ const STRIKE_TIMINGS := [
 ]
 const STRIKE_CROSSING := 0.54
 const DASH_TIME := 0.134
+const HERALD_INTERVAL := 10.0
+const HERALD_WARNING := 0.68
 
 var battle
 var oath_book: Oaths
@@ -183,21 +188,32 @@ func upgrade_options(index: int) -> Dictionary:
 		"allowed": allowed, "levels": data.levels.duplicate()}
 
 
-func inspect_radius(index: int) -> float:
+func inspect_radius(index: int, upgrade_preview := false) -> float:
 	if index < 0 or index >= towers.size():
 		return 0.0
 	var slot := towers[index]
-	match slot.kind:
+	var kind: String = battle.support_kind[index] if slot.level == 0 else slot.kind
+	var rank: int = battle.run.blueprints.get(kind, 1) if slot.level == 0 else slot.level
+	if upgrade_preview:
+		rank += 1
+	match kind:
 		"ballista":
-			return 320.0 * (1.25 if slot.high_ground else 1.0)
+			return ballista_radius(slot)
 		"brazier":
-			var weather_scale := 0.70 if battle.biome == 0 and battle.weather_left > 0.0 else 1.0
-			return (180.0 if slot.level == 1 else 240.0) * weather_scale
+			return brazier_radius(rank) * battle.light_radius_scale()
 		"barricade":
-			return 76.0 if slot.level == 3 else 35.0
+			return BARRICADE_LIGHT * battle.light_radius_scale() if rank >= 3 or slot.will_time > 0.0 else BARRICADE_LURE
 		"oil":
-			return oil_radius(slot)
+			return oil_radius(rank)
 	return 0.0
+
+
+func ballista_radius(slot: Slot) -> float:
+	return 320.0 * (1.25 if slot.high_ground else 1.0)
+
+
+func brazier_radius(rank: int) -> float:
+	return 180.0 if rank == 1 else 240.0
 
 
 func build(index: int, kind: String) -> bool:
@@ -286,10 +302,12 @@ func extinguish_index(index: int) -> bool:
 	return extinguish(towers[index])
 
 
-func extinguish_near(position_value: Vector2, radius: float) -> void:
+func extinguish_near(position_value: Vector2, radius: float) -> PackedVector2Array:
+	var affected := PackedVector2Array()
 	for slot: Slot in towers:
-		if slot.position.distance_squared_to(position_value) <= radius * radius:
-			extinguish(slot)
+		if slot.position.distance_squared_to(position_value) <= radius * radius and extinguish(slot):
+			affected.append(slot.position)
+	return affected
 
 
 func extinguish(slot: Slot) -> bool:
@@ -306,13 +324,12 @@ func light_sources() -> Array[Dictionary]:
 	var sources: Array[Dictionary] = []
 	for slot in towers:
 		if slot.kind == "brazier" and slot.lit and slot.health > 0.0:
-			var radius := 180.0 if slot.level == 1 else 240.0
-			sources.append({"position": slot.position, "radius": radius, "ignore_occlusion": slot.high_ground,
+			sources.append({"position": slot.position, "radius": brazier_radius(slot.level), "ignore_occlusion": slot.high_ground,
 				"energy": 0.66 if slot.level == 1 else 0.74})
 		elif slot.kind == "barricade" and (slot.level >= 3 or slot.will_time > 0.0):
-			sources.append({"position": slot.position, "radius": 76.0, "energy": 0.50})
+			sources.append({"position": slot.position, "radius": BARRICADE_LIGHT, "energy": 0.50})
 		elif slot.kind == "oil" and slot.burn > 0.0:
-			sources.append({"position": slot.position, "radius": oil_radius(slot), "energy": 0.49})
+			sources.append({"position": slot.position, "radius": oil_radius(slot.level), "energy": 0.49})
 	return sources
 
 
@@ -521,7 +538,7 @@ func step_slot(slot: Slot, delta: float, repair_rate: float) -> void:
 				fire_ballista(slot)
 		"brazier":
 			if slot.lit and slot.level >= 2:
-				var radius := 240.0 if not battle.is_harsh_weather() or battle.biome != 0 else 168.0
+				var radius: float = brazier_radius(slot.level) * battle.light_radius_scale()
 				for foe in enemies:
 					if not foe.removed and foe.position.distance_squared_to(slot.position) <= radius ** 2 and battle.light_manager.is_position_lit(foe.position, slot.high_ground):
 						damage_enemy(foe, 3.5 * delta, true, true)
@@ -529,22 +546,22 @@ func step_slot(slot: Slot, delta: float, repair_rate: float) -> void:
 			update_oil(slot, delta)
 
 
-func oil_radius(slot: Slot) -> float:
-	return 46.0 if slot.level == 1 else 61.0
+func oil_radius(rank: int) -> float:
+	return 46.0 if rank == 1 else 61.0
 
 
 func update_oil(slot: Slot, delta: float) -> void:
 	if slot.burn > 0.0:
 		slot.burn = maxf(0.0, slot.burn - delta)
 		for foe in enemies:
-			if not foe.removed and foe.kind != Enemy.MOTH and foe.position.distance_squared_to(slot.position) <= oil_radius(slot) ** 2:
+			if not foe.removed and foe.kind != Enemy.MOTH and foe.position.distance_squared_to(slot.position) <= oil_radius(slot.level) ** 2:
 				foe.burned = maxf(foe.burned, 1.2)
 				if slot.level >= 2:
 					foe.sundered = maxf(foe.sundered, 1.3)
 				damage_enemy(foe, (16.0 if slot.level == 1 else 19.0) * delta, true, true)
 		if slot.burn == 0.0:
 			light_lost(slot.position)
-	elif not slot.spent and ground_target_in(slot.position, oil_radius(slot)):
+	elif not slot.spent and ground_target_in(slot.position, oil_radius(slot.level)):
 		var player_pos: Vector2 = battle.player
 		var lamp_radius := 152.0 if not battle.is_harsh_weather() or battle.biome != 0 else 106.4
 		var near_lamp: bool = battle.lantern_on and battle.oil > 0.0 and player_pos.distance_to(slot.position) <= lamp_radius
@@ -570,9 +587,9 @@ func ignite(slot: Slot) -> bool:
 	slot.spent = true
 	slot.burn = 10.0 if slot.level == 3 else 6.0
 	var wrap: Dictionary = oath_book.on_oil_ignite(owned_oaths())
-	add_ring(slot.position, oil_radius(slot), Color("#fa9c64"), 0.47)
+	add_ring(slot.position, oil_radius(slot.level), Color("#fa9c64"), 0.47)
 	for foe in enemies:
-		if foe.removed or foe.kind == Enemy.MOTH or foe.position.distance_squared_to(slot.position) > oil_radius(slot) ** 2:
+		if foe.removed or foe.kind == Enemy.MOTH or foe.position.distance_squared_to(slot.position) > oil_radius(slot.level) ** 2:
 			continue
 		if not wrap.is_empty():
 			foe.wrapped = maxf(foe.wrapped, wrap.seconds)
@@ -585,7 +602,7 @@ func ignite(slot: Slot) -> bool:
 func fire_ballista(slot: Slot, is_salvo := false) -> bool:
 	if slot.disabled > 0.0:
 		return false
-	var radius := 320.0 * (1.25 if slot.high_ground else 1.0)
+	var radius := ballista_radius(slot)
 	var chosen: Enemy
 	var best := INF
 	for foe: Enemy in enemies:
@@ -1012,7 +1029,7 @@ func step_enemy(foe: Enemy, delta: float) -> void:
 		return
 	if foe.kind != Enemy.MOTH:
 		for slot in towers:
-			if slot.kind == "oil" and (not slot.spent or slot.burn > 0.0) and slot.position.distance_squared_to(foe.position) <= oil_radius(slot) ** 2:
+			if slot.kind == "oil" and (not slot.spent or slot.burn > 0.0) and slot.position.distance_squared_to(foe.position) <= oil_radius(slot.level) ** 2:
 				slow = maxf(slow, 0.35)
 	var speed := foe.speed * (1.0 - slow)
 	if foe.affliction == 1 and foe.health < foe.max_health * 0.50:
@@ -1054,7 +1071,7 @@ func step_walker(foe: Enemy, speed: float, delta: float) -> void:
 	var target := walker_guide(foe)
 	var direction := foe.position.direction_to(target)
 	var best := -1
-	var reach := 35.0
+	var reach := BARRICADE_LURE
 	for index in range(towers.size()):
 		var slot := towers[index]
 		if slot.kind != "barricade":
@@ -1191,7 +1208,7 @@ func update_enemy_attack(foe: Enemy, delta: float) -> bool:
 				if hurt_player(damage * (1.0 + 0.08 * float(battle.run.cycle - 1)), foe.position):
 					enemy_contact.emit(origin, foe.facing, heavy)
 		Enemy.TARGET_FIRE:
-			battle.hurt_fire(foe.power)
+			battle.hurt_fire(foe.power, true)
 			var fire: Vector2 = battle.fire_point
 			add_ring(fire, 23.0, Color("#fb8b62"), 0.27)
 			enemy_contact.emit(fire, foe.facing, heavy)
@@ -1257,7 +1274,7 @@ func move_moth(foe: Enemy, speed: float, delta: float) -> void:
 		extinguish(vessel)
 		battle.announce("噬火蛾扑灭了一座烽火盆")
 	else:
-		battle.hurt_fire(15.0)
+		battle.hurt_fire(15.0, true)
 		battle.announce("噬火蛾撞上篝火，火势 -15")
 
 
@@ -1328,14 +1345,15 @@ func herald_cycle(foe: Enemy, delta: float) -> void:
 	foe.special -= delta
 	if foe.special > 0.0:
 		return
-	foe.special = 10.0
-	extinguish_near(foe.position, 225.0)
+	foe.special = HERALD_INTERVAL
+	var affected := extinguish_near(foe.position, 225.0)
 	add_ring(foe.position, 225.0, Color("#ab6197"), 0.92)
 	for i in range(2):
 		var minion := spawn(Enemy.CRAWLER, foe.lane)
 		if minion != null:
 			minion.position = foe.position + Vector2(16.0 * (i * 2 - 1), 12.0)
 			minion.waypoint = mini(foe.waypoint, minion.path.size() - 1)
+	herald_cast.emit(foe.position, affected)
 
 
 func damage_enemy(foe: Enemy, amount: float, flame := false, ignores_armor := false, from_melee := false) -> void:

@@ -12,14 +12,16 @@ func _initialize() -> void:
 	run_checks.call_deferred()
 
 func run_checks() -> void:
+	var battle_script: Script = load("res://scripts/battle/BattleLevel.gd")
+	var rules := battle_script.get_script_constant_map()
 	for biome in range(4):
-		await check_region(biome)
+		await check_region(biome, rules.PLAYER_RADIUS, rules.SLOT_REACH)
 	await check_transformed_terrain()
 	await check_occupied_bridges()
 	print("Night Watcher mesh collision: %d checks, %d failed" % [checks, failures])
 	quit(int(failures > 0))
 
-func check_region(biome: int) -> void:
+func check_region(biome: int, watcher_radius: float, interaction_range: float) -> void:
 	var region: Dictionary = Terrain.MAPS[biome]
 	var view := make_view()
 	var model := Model.new()
@@ -39,8 +41,18 @@ func check_region(biome: int) -> void:
 	await physics_frame
 	await physics_frame
 	var hearth := Terrain.point(region["fire"])
-	verify(resolver.can_stand(Terrain.point(region["start"]), 12.0), "%d watcher spawn is clear" % biome)
-	verify(resolver.can_stand(hearth, 12.0), "%d hearth approach is clear" % biome)
+	var watcher := Terrain.point(region["start"])
+	verify(resolver.can_stand(watcher, watcher_radius), "%d watcher spawn is clear" % biome)
+	verify(resolver.can_stand(hearth, watcher_radius), "%d hearth approach is clear" % biome)
+	var reachable := connected_ground(resolver, watcher, watcher_radius)
+	for site: Array in Terrain.SUPPORTS[biome]:
+		var anchor := Terrain.point(site[0])
+		var accessible := false
+		for stand in reachable:
+			if stand.distance_squared_to(anchor) < interaction_range * interaction_range:
+				accessible = true
+				break
+		verify(accessible, "%d %s can be approached from the watcher spawn" % [biome, site[3]])
 	for state: int in ([-1, 0, 1] if biome == 2 else [-1]):
 		var effective: Array[PackedVector2Array] = []
 		for index in range(paths.size()):
@@ -58,6 +70,29 @@ func check_region(biome: int) -> void:
 				verify(clear, "%d bridge %d lane %d radius %d sweeps to the hearth" % [biome, state, lane, radius])
 	view.queue_free()
 	await process_frame
+
+func connected_ground(resolver: Collision, watcher: Vector2, radius: float) -> PackedVector2Array:
+	var grid := resolver.grid(radius)
+	var first := resolver.nearby_cell(grid, watcher, radius)
+	if not grid.is_in_boundsv(first):
+		return PackedVector2Array()
+	var pending: Array[Vector2i] = [first]
+	var seen := {first: true}
+	var points := PackedVector2Array()
+	var index := 0
+	while index < pending.size():
+		var current := pending[index]
+		var stand := grid.get_point_position(current)
+		points.append(stand)
+		index += 1
+		for step: Vector2i in [Vector2i.UP, Vector2i.RIGHT, Vector2i.DOWN, Vector2i.LEFT]:
+			var next := current + step
+			if not grid.is_in_boundsv(next) or seen.has(next) or grid.is_point_solid(next):
+				continue
+			if resolver.traverse_clear(stand, grid.get_point_position(next), radius):
+				seen[next] = true
+				pending.append(next)
+	return points
 
 func check_transformed_terrain() -> void:
 	var view := make_view()
@@ -109,12 +144,21 @@ func check_occupied_bridges() -> void:
 		battle.ambience.stream = null
 		await physics_frame
 		await physics_frame
+		var reachable := connected_ground(battle.collision, battle.player, battle.PLAYER_RADIUS)
 		var crossing: Vector2 = battle.bridges[index]
 		battle.player = crossing
 		battle.use_bridge()
 		verify(battle.bridge_closed == -1, "Bridge %d cannot rise under the watcher" % index)
-		var stand := crossing + Vector2.from_angle(-PI / 10 if index == 0 else PI) * 53.0
-		battle.player = stand
+		for stand in reachable:
+			if not battle.collision.occupies_bridge(index, stand, battle.PLAYER_RADIUS, 2.0):
+				battle.player = stand
+				if battle.closest(battle.levers, 68.0) == index:
+					break
+		var at_lever: bool = (
+			battle.closest(battle.levers, 68.0) == index
+			and not battle.collision.occupies_bridge(index, battle.player, battle.PLAYER_RADIUS, 2.0)
+		)
+		verify(at_lever, "Bridge %d lever can be operated from dry ground connected to the spawn" % index)
 		var crawler = battle.combat.spawn(battle.Combat.Enemy.CRAWLER, index)
 		crawler.position = crossing
 		battle.use_bridge()

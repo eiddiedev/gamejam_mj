@@ -12,15 +12,15 @@ const PIXELS := 55.0
 
 const LAND := [
 	[Color("#576e6b"), Color("#374e58"), Color("#85988c"), Color("#7b8074")],
-	[Color("#8f6f55"), Color("#625453"), Color("#b0956c"), Color("#a38869")],
-	[Color("#4d6868"), Color("#304757"), Color("#788e83"), Color("#827f70")],
+	[Color("#a6846c"), Color("#5f565d"), Color("#c1a079"), Color("#ac8b70")],
+	[Color("#506b68"), Color("#385d60"), Color("#859477"), Color("#8e876e")],
 	[Color("#748296"), Color("#3c4e60"), Color("#acb8c2"), Color("#8e9196")]
 ]
 const REGIONS := [
-	"res://scripts/model/FallenKing.gd",
-	"res://scripts/model/Sandstone.gd",
-	"res://scripts/model/RootKeep.gd",
-	"res://scripts/model/Obsidian.gd",
+	preload("res://scripts/model/FallenKing.gd"),
+	preload("res://scripts/model/Sandstone.gd"),
+	preload("res://scripts/model/RootKeep.gd"),
+	preload("res://scripts/model/Obsidian.gd"),
 ]
 
 var mesh := Builder.new()
@@ -39,6 +39,7 @@ var fire_paint: ShaderMaterial
 var haze_layers: Array[ShaderMaterial] = []
 var hearth_paints: Array[ShaderMaterial] = []
 var hearth_strokes: Builder
+var canal_paint: ShaderMaterial
 var air: Environment
 var bridges: Array[Node3D] = []
 var crystal_nodes: Array[Node3D] = []
@@ -54,9 +55,8 @@ func build_region(region: int) -> void:
 	make_camera()
 	if region == 0:
 		hearth_strokes = Builder.new()
-	make_ground(region != 0)
-	var region_script: Script = load(REGIONS[region])
-	region_script.build(self)
+	make_ground(region not in [0, 1])
+	REGIONS[region].build(self)
 	if region in [0, 2]:
 		make_ground_cover(region)
 	var land := MeshInstance3D.new()
@@ -72,7 +72,7 @@ func build_region(region: int) -> void:
 	add_child(detail)
 	make_hearth_flame()
 	make_hearth_haze()
-	if region == 0:
+	if region in [0, 1]:
 		make_hearth_pigment()
 	if region == 2:
 		make_drawbridges()
@@ -131,7 +131,6 @@ func make_camera() -> void:
 	camera.make_current()
 	material = ShaderMaterial.new()
 	material.shader = PAINT
-	material.set_shader_parameter("mist", palette[1])
 	var screen := MeshInstance3D.new()
 	var quad := QuadMesh.new()
 	quad.size = Vector2(2, 2)
@@ -140,12 +139,15 @@ func make_camera() -> void:
 	stroke = ShaderMaterial.new()
 	stroke.shader = EDGES
 	stroke.render_priority = 85
+	stroke.set_shader_parameter("air_pigment", palette[1].lightened(0.10))
 	screen.material_override = stroke
 	camera.add_child(screen)
 
 func animate(clock: float, bridge_closed: int, crystals: Array[Dictionary]) -> void:
 	material.set_shader_parameter("seconds", clock)
 	stroke.set_shader_parameter("seconds", clock)
+	if canal_paint != null:
+		canal_paint.set_shader_parameter("seconds", clock)
 	for index in range(bridges.size()):
 		var bridge := bridges[index]
 		var inclination := -1.02 if index == bridge_closed else 0.0
@@ -173,7 +175,8 @@ func paint_textured_prop(prop: Node3D) -> void:
 func relight(night: bool, fuel: float, clock: float) -> void:
 	moon.light_color = Color("#91aed1") if night else Color("#dde9e2")
 	moon.light_energy = 0.32 if night else 0.49
-	air.ambient_light_energy = 0.63 if night else 0.76
+	air.ambient_light_color = Color("#b0c7d4") if night else Color("#c5d3cc")
+	air.ambient_light_energy = 0.61 if night else 0.77
 	var flicker := 0.97 + sin(clock * 9.5) * 0.066 + sin(clock * 21.6) * 0.028
 	hearth_light.light_energy = fuel * flicker * (1.24 if night else 0.92)
 	hearth_light.omni_range = lerpf(2.2, 6.6 if hearth_paints.is_empty() else 7.1, fuel)
@@ -236,8 +239,9 @@ func make_hearth_pigment() -> void:
 	ground_plane.size = Vector2(11.9, 10.8)
 	var wash := add_hearth_paint("Firelit pigment on the soil", ground_plane, false)
 	wash.position = at(hearth[0], hearth[1], 0.040)
-	add_hearth_paint("Firelit edges of roots and stone", hearth_strokes.build(), true)
-	hearth_strokes = null
+	if hearth_strokes != null:
+		add_hearth_paint("Firelit edges of roots and stone", hearth_strokes.build(), true)
+		hearth_strokes = null
 	hearth_light.light_color = Color("#ffa35b")
 	hearth_light.omni_attenuation = 1.14
 

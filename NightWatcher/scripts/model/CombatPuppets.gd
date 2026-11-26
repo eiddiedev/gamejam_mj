@@ -55,6 +55,8 @@ func sync(delta: float) -> void:
 		if not is_instance_valid(source) or source is Enemy and source.removed:
 			var rig: Dictionary = actors[source]
 			var root: Node3D = rig.root
+			if rig.has("rite"):
+				(rig.rite as Node3D).hide()
 			if root.visible:
 				fallen.append({"rig": rig, "time": 0.0, "ground": root.position,
 					"size": root.scale, "turn": root.rotation.y})
@@ -218,9 +220,32 @@ func make_biped(kind: int) -> Dictionary:
 		rig["sword"] = add_weapon(palms[0], paint, "staff")
 	elif kind == Enemy.HERALD:
 		rig["sword"] = add_weapon(palms[1], paint, "herald")
+		rig["rite"] = make_herald_rite(palms[0])
 	elif kind == Enemy.COLOSSUS:
 		rig["sword"] = add_weapon(palms[1], paint, "maul")
 	return rig
+
+func make_herald_rite(palm: Node3D) -> Node3D:
+	var mesh := Builder.new()
+	var core := Color("#f4badf")
+	var corona := Color("#ac5097")
+	for edge in range(8):
+		var a := TAU * edge / 8.0
+		var b := a + TAU / 8.0
+		var left := Vector3(cos(a), 0.0, sin(a))
+		var right := Vector3(cos(b), 0.0, sin(b))
+		mesh.triangle(Vector3.UP * 0.12, left * 0.055, right * 0.055, core)
+		mesh.triangle(Vector3.DOWN * 0.094, right * 0.055, left * 0.055, corona)
+		mesh.quad(left * 0.152, left * 0.162, right * 0.162, right * 0.152, corona)
+	var pigment := StandardMaterial3D.new()
+	pigment.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	pigment.vertex_color_use_as_albedo = true
+	pigment.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var rite := part(palm, "Gathered darkness", mesh, pigment)
+	rite.position = Vector3(0.0, -0.18, 0.07)
+	rite.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	rite.hide()
+	return rite
 
 func coat_color(kind: int) -> Color:
 	match kind:
@@ -484,13 +509,13 @@ func pose_watcher(watcher: Watcher, rig: Dictionary, point: Vector2, delta: floa
 	var speed := place(rig, point, facing, 0.018, delta)
 	var stride: float = rig.stride
 	var gait := smoothstep(0.13, 3.35, speed)
-	var chamber := smoothstep(0.0, 0.42, watcher.charge)
+	var chamber := smoothstep(0.09, 0.42, watcher.charge)
 	var chambered := chamber
 	var recovery := 0.0
 	var impact := 0.0
 	var sweep := 0.0
 	var side := -1.0 if not ally and combat.combo == 2 else 1.0
-	var heavy: bool = not ally and combat.strike_heavy
+	var heavy: bool = not ally and (combat.strike_heavy if attacking else watcher.charge > 0.09)
 	if attacking:
 		if ally:
 			sweep = smoothstep(0.0, 0.92, 1.0 - watcher.swing / 0.23)
@@ -503,27 +528,35 @@ func pose_watcher(watcher: Watcher, rig: Dictionary, point: Vector2, delta: floa
 			recovery = smoothstep(timing.x+timing.y, combat.strike_total, clock)
 			impact = smoothstep(0.0,0.54,sweep)
 	var thrust := impact * (1.0 - recovery)
+	# Draw against the rear leg, then turn through the cut. The held charge and
+	# first release frame use the same chamber before the blade advances.
+	var load := chambered if ally else chambered * (1.0 - impact) * (1.0 - recovery)
+	var weight := 0.0 if ally else 1.0 if heavy else 0.37
+	var pelvis := Vector3(side * (0.032 * load - 0.037 * thrust) * weight, 0.0,
+		(-0.058 * load + 0.082 * thrust) * weight)
 	var settle := float(watcher.dash > 0.0) * clampf(watcher.dash / 0.20, 0.0, 1.0)
 	var tired := smoothstep(1.67,1.85,watcher.injury)
-	var hips := 0.501 - gait * 0.048 - settle*0.064 - thrust*0.018
+	var hips := 0.501 - gait * 0.048 - settle*0.064 - thrust*0.018 - weight * (0.053 * load + 0.075 * thrust)
 	var torso: Node3D = rig.chest
+	torso.position.x = pelvis.x
 	torso.position.y = hips + 0.08 + gait * absf(sin(stride)) * 0.021 - tired*0.026
-	torso.position.z = 0.07*thrust - 0.038*chambered + settle*0.092
-	torso.rotation = Vector3(0.10*gait - chambered*0.18 + thrust*0.38 + settle*0.23 - tired*0.23,
-		side * (thrust*0.43 - chambered*0.37) + sin(stride)*gait*0.09,
-		sin(stride)*gait*0.085 + tired*0.17)
+	torso.position.z = pelvis.z + 0.07*thrust - 0.038*load + settle*0.092
+	torso.rotation = Vector3(0.10*gait - load*(0.18 + 0.14*weight) + thrust*(0.38 + 0.24*weight) + settle*0.23 - tired*0.23,
+		side * (thrust*(0.43 + 0.18*weight) - load*(0.37 + 0.24*weight)) + sin(stride)*gait*0.09,
+		sin(stride)*gait*0.085 + tired*0.17 + side * (load*0.09 + thrust*0.13)*weight)
 	var head: Node3D = rig.head
 	head.rotation.x = -torso.rotation.x*0.47 + (sin(watcher.clock*2.7)*0.025)*(1.0-gait)
 	head.rotation.y = -torso.rotation.y*0.54
 	var cloth: Node3D = rig.capes
 	var slack := gait * (0.20 + 0.09*sin(stride-0.5)) + settle*0.48
-	cloth.rotation.x = 0.06 + slack + thrust*0.16
-	cloth.rotation.z = sin(stride+0.9)*0.14*gait + side*thrust*0.27
-	plant_legs(rig, hips, speed, delta if not frozen else 0.0)
+	cloth.rotation.x = 0.06 + slack - load*0.10*weight + thrust*(0.16 + 0.21*weight)
+	cloth.rotation.z = sin(stride+0.9)*0.14*gait + side*thrust*(0.27 + 0.16*weight)
+	plant_legs(rig, hips, speed, delta if not frozen else 0.0, pelvis)
 	var arms: Array = rig.arms
 	var elbows: Array = rig.elbows
-	arms[0].rotation = Vector3(-0.50 + sin(stride)*0.14*gait - chambered*0.18 + settle*0.24, -0.06, -0.29-thrust*0.13)
-	elbows[0].rotation.x = -0.51 - 0.13*chambered
+	arms[0].rotation = Vector3(-0.50 + sin(stride)*0.14*gait - load*0.18 + settle*0.24 + thrust*weight*0.25,
+		-0.06 - load*weight*0.16, -0.29-thrust*(0.13 + 0.16*weight))
+	elbows[0].rotation.x = -0.51 - 0.13*load
 	var lamp: Node3D = rig.lantern
 	lamp.rotation = Vector3(0.80 - sin(stride-0.38)*0.18*gait+settle*0.11,0.0,sin(stride+0.4)*gait*0.15)
 	pose_sword_arm(rig, chambered, sweep, recovery, side, heavy, gait, stride)
@@ -533,7 +566,7 @@ func pose_watcher(watcher: Watcher, rig: Dictionary, point: Vector2, delta: floa
 func pose_sword_arm(rig: Dictionary, draw: float, sweep: float, recovery: float, side: float,
 		heavy: bool, gait: float, stride: float) -> void:
 	var root: Node3D = rig.root
-	var cut_angle := side * lerpf(0.54, -1.34, draw)
+	var cut_angle := lerpf(0.54, side * -1.34, draw)
 	if sweep > 0.0:
 		if sweep < 0.54:
 			cut_angle = side * lerpf(-1.34,0.0,ease(sweep / 0.54,1.62))
@@ -543,7 +576,9 @@ func pose_sword_arm(rig: Dictionary, draw: float, sweep: float, recovery: float,
 	var radial := Vector3(sin(cut_angle),0.0,cos(cut_angle))
 	var pull := draw*(1.0-sweep)*(1.0-recovery)
 	var sweep_fold := sin(sweep*PI)*(1.0-recovery)
-	var hand := Vector3(0.24,0.71 + pull*(0.42 if heavy else 0.24) + sweep_fold*0.07,0.03)
+	var cut_weight := smoothstep(0.17, 0.66, sweep) * (1.0-recovery) if heavy else 0.0
+	var hand := Vector3(0.24, 0.71 + pull*(0.50 if heavy else 0.24) + sweep_fold*0.07 - cut_weight*0.105,
+		0.03 + cut_weight*0.069)
 	hand += radial*(0.19+0.10*sweep_fold)
 	hand.z += sin(stride-0.2)*gait*0.04*(1.0-draw)
 	var arms: Array = rig.arms
@@ -553,7 +588,7 @@ func pose_sword_arm(rig: Dictionary, draw: float, sweep: float, recovery: float,
 	var chest: Node3D = rig.chest
 	var destination := chest.to_local(root.to_global(hand))
 	solve_hinge(shoulder,elbow,destination,Vector3(0.67,-0.58,-0.31),ARM_LENGTH,FOREARM_LENGTH)
-	var slope := lerpf(0.44,0.88 if heavy else 0.42,pull)-sweep_fold*(0.48 if heavy else 0.28)
+	var slope := lerpf(0.44,1.51 if heavy else 0.42,pull)-sweep_fold*(0.89 if heavy else 0.28)
 	var upward := (radial + Vector3.UP*slope).normalized()
 	var cross := Vector3.UP.cross(upward).normalized()
 	var sword: Node3D = rig.sword
@@ -576,6 +611,16 @@ func pose_enemy(enemy: Enemy, rig: Dictionary, delta: float) -> void:
 		flash(rig, enemy.hit/0.13)
 		return
 	var recoil := maxf(enemy.stagger/0.29,enemy.hit/0.13)
+	if enemy.kind == Enemy.CRAWLER:
+		if enemy.tell > 0.0 or enemy.attack_pose > 0.0:
+			pose_crawler_attack(enemy, rig, recoil)
+			flash(rig,maxf(enemy.hit/0.13, recoil*0.58))
+			return
+		if rig.erase("rake_feet"):
+			(rig.chest as Node3D).position.x = 0.0
+			(rig.head as Node3D).rotation.y = 0.0
+			for palm: Node3D in rig.palms:
+				palm.rotation = Vector3.ZERO
 	var gait := smoothstep(0.10,1.39,speed) if enemy.acting else 0.0
 	var weight := 0.72 if enemy.kind in [Enemy.COLOSSUS,Enemy.HERALD] else 1.0
 	var stride: float = rig.stride
@@ -611,15 +656,112 @@ func pose_enemy(enemy: Enemy, rig: Dictionary, delta: float) -> void:
 	if rig.has("sword"):
 		var weapon: Node3D = rig.sword
 		weapon.rotation.x = (0.74 if enemy.kind == Enemy.HEXER else 1.19) - 0.50*withdrawal + 0.48*thrust
+	if enemy.kind == Enemy.HERALD:
+		pose_herald_rite(enemy, rig)
 	flash(rig,maxf(enemy.hit/0.13, recoil*0.58))
 
 
-func plant_legs(rig: Dictionary, hip_height: float, speed: float, delta: float) -> void:
+func pose_herald_rite(enemy: Enemy, rig: Dictionary) -> void:
+	var combat = battle.combat
+	var gathering := smoothstep(0.0, combat.HERALD_WARNING, combat.HERALD_WARNING - enemy.special)
+	var elapsed: float = combat.HERALD_INTERVAL - enemy.special
+	var discharge := 1.0 - smoothstep(0.025, 0.56, elapsed)
+	var rite: Node3D = rig.rite
+	rite.visible = maxf(gathering, discharge) > 0.025
+	if not rite.visible:
+		return
+	var chest: Node3D = rig.chest
+	var shoulder: Node3D = rig.arms[0]
+	var elbow: Node3D = rig.elbows[0]
+	var palm: Node3D = rig.palms[0]
+	var weight := maxf(gathering, discharge)
+	var engaged := 0.65 if enemy.tell > 0.0 or enemy.attack_pose > 0.0 else 1.0
+	var hand := chest.to_local(palm.global_position)
+	var reach := Vector3(-0.38, 0.54 - discharge*0.12, 0.29 + discharge*0.13)
+	solve_hinge(shoulder, elbow, hand.lerp(reach, weight * engaged), Vector3(-0.8,-0.4,-0.21), ARM_LENGTH, FOREARM_LENGTH)
+	chest.rotation.y += (gathering * 0.23 - discharge * 0.18) * engaged
+	chest.rotation.x += (-gathering * 0.11 + discharge * 0.08) * engaged
+	rite.scale = Vector3.ONE * (gathering * (0.83 + sin(enemy.age * 29.0) * 0.12) + discharge * 0.49)
+	rite.rotation = Vector3(enemy.age * 4.6, enemy.age * 2.4, 0.31)
+
+
+func pose_crawler_attack(enemy: Enemy, rig: Dictionary, recoil: float) -> void:
+	var released := enemy.attack_pose > 0.0
+	var progress := 1.0 if released else 1.0 - enemy.tell / enemy.tell_span
+	var recovery := 1.0 - enemy.attack_pose / enemy.attack_recovery if released else 0.0
+	var strike := smoothstep(0.76, 1.0, progress)
+	var load := smoothstep(0.03, 0.57, progress) * (1.0 - strike)
+	var follow := strike * (1.0 - smoothstep(0.18, 0.93, recovery))
+	var hips := 0.502 - load * 0.085 - follow * 0.127 - recoil * 0.034
+	# Sit onto the rear hip, then let the chest pass over the foot that catches the rush.
+	var center := Vector3(0.047 * load - 0.064 * follow, 0.0, -0.08 * load + 0.124 * follow)
+	var chest: Node3D = rig.chest
+	chest.position = Vector3(center.x, hips + 0.063, center.z - recoil * 0.06)
+	chest.rotation = Vector3(0.075 - 0.40 * load + 0.75 * follow - recoil * 0.36,
+		0.51 * load - 0.53 * follow, 0.14 * load + 0.21 * follow + recoil * 0.18)
+	var head: Node3D = rig.head
+	head.rotation = Vector3(-0.11 + 0.21 * load - 0.42 * follow, -chest.rotation.y * 0.53,
+		-chest.rotation.z * 0.42)
+	pose_crawler_feet(rig, progress, released, recovery)
+	solve_legs(rig, hips, center)
+
+	var arms: Array = rig.arms
+	var elbows: Array = rig.elbows
+	var palms: Array = rig.palms
+	var claw := relaxed_crawler_hand(arms[1], 1.0).lerp(Vector3(0.46, 0.70, -0.18), load)
+	claw = claw.lerp(Vector3(0.018, 0.47, 0.40), follow)
+	var counter := relaxed_crawler_hand(arms[0], -1.0).lerp(Vector3(-0.42, 0.18, 0.28), load)
+	counter = counter.lerp(Vector3(-0.48, 0.15, -0.23), follow)
+	solve_hinge(arms[1], elbows[1], claw, Vector3(0.77, -0.43, -0.36), ARM_LENGTH, FOREARM_LENGTH)
+	solve_hinge(arms[0], elbows[0], counter, Vector3(-0.62, -0.51, -0.51), ARM_LENGTH, FOREARM_LENGTH)
+	palms[1].rotation = Vector3(-0.26 * load + 0.52 * follow, -0.31 * follow, 0.20 * load - 0.25 * follow)
+	palms[0].rotation = Vector3(-0.10 * load - 0.22 * follow, 0.0, -0.13 * load)
+
+
+func relaxed_crawler_hand(shoulder: Node3D, side: float) -> Vector3:
+	var reach := Vector3.DOWN * ARM_LENGTH + (Vector3.DOWN * FOREARM_LENGTH).rotated(Vector3.RIGHT, -0.46)
+	return shoulder.position + Basis.from_euler(Vector3(-0.28, side * 0.16, side * 0.25)) * reach
+
+
+func pose_crawler_feet(rig: Dictionary, progress: float, released: bool, recovery: float) -> void:
 	var root: Node3D = rig.root
 	var feet: Array = rig.feet
-	var thighs: Array = rig.thighs
-	var knees: Array = rig.knees
-	var boots: Array = rig.boots
+	var lead: FootPin = feet[0]
+	var rear: FootPin = feet[1]
+	var rest_lead := root.to_global(Vector3(-0.129, 0.05, -0.035))
+	if not rig.has("rake_feet") or rig.reset_feet:
+		var front := rest_lead if rig.reset_feet else lead.position
+		var back := root.to_global(Vector3(0.129, 0.05, 0.051)) if rig.reset_feet else rear.position
+		rig.rake_feet = {"front": front, "back": back, "land": Vector3.INF}
+		rig.reset_feet = false
+	var pins: Dictionary = rig.rake_feet
+	var settling := smoothstep(0.0, 0.23, progress)
+	var planted_rear: Vector3 = pins.back
+	planted_rear.y = rest_lead.y
+	rear.anchor = planted_rear
+	rear.position = (pins.back as Vector3).lerp(planted_rear, settling)
+	rear.age = 0.0 if rear.position.y > planted_rear.y + 0.0001 else -1.0
+	var target := root.to_global(Vector3(-0.18, 0.05, 0.24))
+	if released:
+		if pins.land == Vector3.INF:
+			pins.land = target
+		var reset := smoothstep(0.63, 0.98, recovery)
+		var land: Vector3 = pins.land
+		lead.anchor = land.lerp(rest_lead, reset)
+		lead.position = lead.anchor + Vector3.UP * sin(reset * PI) * 0.062
+		lead.age = 0.0 if reset > 0.0 and reset < 1.0 else -1.0
+		return
+	var swing := smoothstep(0.70, 1.0, progress)
+	var planted: Vector3 = pins.front
+	planted.y = lerpf(planted.y, rest_lead.y, settling)
+	lead.anchor = planted
+	lead.position = planted.lerp(target, swing) + Vector3.UP * sin(PI * swing) * 0.109
+	lead.age = 0.0 if lead.position.y > rest_lead.y + 0.0001 else -1.0
+
+
+func plant_legs(rig: Dictionary, hip_height: float, speed: float, delta: float, pelvis := Vector3.ZERO) -> void:
+	var root: Node3D = rig.root
+	var feet: Array = rig.feet
 	var velocity: Vector3 = rig.velocity
 	var forward := velocity.normalized()
 	var had_step := false
@@ -664,14 +806,25 @@ func plant_legs(rig: Dictionary, hip_height: float, speed: float, delta: float) 
 			pin.goal = wanted[pick] + forward * (measured * pin.duration * 0.93 + pace * 0.13 * scale_factor)
 			pin.age = 0.0
 			pin.lift = scale_factor * lerpf(0.055,0.155,smoothstep(0.20,3.6,speed))
+	solve_legs(rig, hip_height, pelvis)
+
+
+func solve_legs(rig: Dictionary, hip_height: float, shift := Vector3.ZERO) -> void:
 	# A weight-bearing leg limits pelvis height rather than dragging its boot.
+	var root: Node3D = rig.root
+	var feet: Array = rig.feet
+	var thighs: Array = rig.thighs
+	var knees: Array = rig.knees
+	var boots: Array = rig.boots
 	var body_height := hip_height
 	for side in range(2):
+		var thigh: Node3D = thighs[side]
+		thigh.position.x = (-0.118 if side == 0 else 0.118) + shift.x
+		thigh.position.z = shift.z
 		var pin: FootPin = feet[side]
 		if pin.age >= 0.0:
 			continue
 		var support := root.to_local(pin.anchor)
-		var thigh: Node3D = thighs[side]
 		var width := Vector2(support.x-thigh.position.x,support.z-thigh.position.z).length_squared()
 		var vertical := sqrt(maxf(0.0, (THIGH_LENGTH+SHIN_LENGTH-0.004)**2-width))
 		body_height = minf(body_height,support.y+vertical)
