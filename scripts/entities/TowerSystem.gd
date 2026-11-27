@@ -137,6 +137,7 @@ func build(index: int, kind: String) -> bool:
 	var rank: int = clampi(battle.run.blueprints.get(kind, 1), 1, 3)
 	slot.install(kind, rank, data.health_at(rank))
 	refresh_links()
+	battle.play_cue("wall")
 	battle.announce("%s已建造 · Lv.%d" % [data.display_name, rank])
 	combat.add_ring(slot.position, 36.0, FIELD_GOLD, 0.52)
 	return true
@@ -151,6 +152,7 @@ func upgrade(index: int) -> bool:
 		return false
 	slot.install(slot.kind, slot.level + 1, data.health_at(slot.level + 1))
 	refresh_links()
+	battle.play_cue("wall")
 	battle.announce("%s已升级 · Lv.%d" % [data.display_name, slot.level])
 	combat.add_ring(slot.position, 48.0, FIELD_GOLD, 0.57)
 	return true
@@ -191,6 +193,7 @@ func repair(index: int) -> bool:
 		return false
 	slot.health = minf(slot.max_health, slot.health + 58.0)
 	combat.ember_spent("repair")
+	battle.play_cue("wood")
 	battle.announce("工事已修复")
 	combat.add_ring(slot.position, 31.0, FIELD_GOLD, 0.48)
 	return true
@@ -204,6 +207,7 @@ func relight(index: int) -> bool:
 		return false
 	slot.lit = true
 	refresh_links()
+	battle.play_cue("fuel")
 	combat.add_ring(slot.position, 37.0, FIELD_GOLD, 0.62)
 	battle.announce("烽火盆重新点燃")
 	return true
@@ -358,6 +362,7 @@ func ignite(slot: Slot, enemies: Array[Enemy]) -> bool:
 		return false
 	slot.spent = true
 	slot.burn = 10.0 if slot.level == 3 else 6.0
+	battle.play_cue("burn")
 	var wrap: Dictionary = oath_book.on_oil_ignite(combat.owned_oaths())
 	combat.add_ring(slot.position, oil_radius(slot.level), Color("#fa9c64"), 0.47)
 	for foe in enemies:

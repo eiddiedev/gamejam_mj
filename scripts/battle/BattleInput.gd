@@ -149,4 +149,5 @@ func borrow_fire() -> void:
 		battle.oil = minf(100.0, battle.oil + 52.0)
 		battle.combat.player_hp = minf(battle.combat.player_hp_max, battle.combat.player_hp + 35.0)
 		battle.lantern_on = true
+		battle.play_cue("fuel")
 		battle.announce("营火整备 · 补灯油，恢复生命")

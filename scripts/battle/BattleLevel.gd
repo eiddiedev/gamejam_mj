@@ -514,6 +514,8 @@ func refresh_view() -> void:
 	shade.color = shade.color.lerp(dark, 0.23)
 	light_manager.refresh_visuals(clock)
 	scenery.update_art()
+	if audio_sys != null:
+		audio_sys.update_atmosphere(night, is_harsh_weather(), boss, fire_hp / 100.0, paused or ended)
 	sync_hud()
 
 
@@ -646,4 +648,5 @@ func acknowledge_battle() -> void:
 
 
 func play_cue(cue_name: String) -> void:
-	audio_sys.play_cue(cue_name)
+	if audio_sys != null:
+		audio_sys.play_cue(cue_name)
